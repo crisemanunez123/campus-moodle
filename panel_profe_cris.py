@@ -928,7 +928,7 @@ elif u["rol"] == "profesor":
 
                         if "Examen" in tipo_modulo:
                             st.markdown("---")
-                            st.markdown("### 🛠️ **Configuración del Examen por Tiempo y Porcentajes**")
+                            st.markdown("### 🛠️ **Configuración del Examen Estilo Moodle (Opciones y Porcentajes)**")
                             dur_min = st.number_input("⏱️ Tiempo límite (minutos):", min_value=1, max_value=240, value=15)
                             cant_pregs = st.number_input("Cantidad de preguntas:", min_value=1, max_value=25, value=2)
                             
@@ -936,27 +936,37 @@ elif u["rol"] == "profesor":
                                 num_preg = i + 1
                                 st.markdown(f"#### **Pregunta N° {num_preg}**")
                                 tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}_{cat_id}")
-                                pct_preg = st.number_input(f"Porcentaje de valor de la pregunta #{num_preg} (%):", min_value=1, max_value=100, value=int(100/cant_pregs), key=f"pct_p_{i}_{cat_id}")
                                 
                                 if tipo_p == "Opción Múltiple":
                                     enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
                                     cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}_{cat_id}")
-                                    ops_cargadas = []
+                                    
+                                    opciones_config = []
                                     for op_idx in range(int(cant_opciones)):
                                         letra = chr(65 + op_idx)
-                                        val_op = st.text_input(f"Opción {letra}:", key=f"op_{i}_{op_idx}_{cat_id}")
-                                        if val_op:
-                                            ops_cargadas.append(val_op.strip())
-                                    if ops_cargadas:
-                                        corr = st.selectbox(f"🎯 Indicar cuál es la Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
-                                        if enun.strip():
-                                            preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr, "porcentaje": pct_preg})
+                                        st.markdown(f"**Elección {letra}:**")
+                                        txt_elec = st.text_input(f"Texto de Elección {letra}:", key=f"elec_txt_{i}_{op_idx}_{cat_id}")
+                                        cal_elec = st.selectbox(f"Calificación / Porcentaje para Elección {letra}:", ["Ninguno (0%)", "33.3%", "50%", "100%"], key=f"elec_cal_{i}_{op_idx}_{cat_id}")
+                                        
+                                        if txt_elec.strip():
+                                            pct_val = 0.0
+                                            if "100%" in cal_elec: pct_val = 100.0
+                                            elif "50%" in cal_elec: pct_val = 50.0
+                                            elif "33.3%" in cal_elec: pct_val = 33.3
+                                            opciones_config.append({"texto": txt_elec.strip(), "calificacion": pct_val})
+
+                                    if enun.strip() and opciones_config:
+                                        preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones_config": opciones_config})
                                 
                                 elif tipo_p == "Verdadero o Falso":
                                     enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}_{cat_id}")
                                     corr_vf = st.radio(f"🎯 Indicar Respuesta CORRECTA #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
                                     if enun_vf.strip():
-                                        preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf, "porcentaje": pct_preg})
+                                        opciones_config = [
+                                            {"texto": "Verdadero", "calificacion": 100.0 if corr_vf == "Verdadero" else 0.0},
+                                            {"texto": "Falso", "calificacion": 100.0 if corr_vf == "Falso" else 0.0}
+                                        ]
+                                        preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones_config": opciones_config})
 
                                 elif tipo_p == "Completar Párrafo":
                                     texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}_{cat_id}")
@@ -964,7 +974,7 @@ elif u["rol"] == "profesor":
                                     if texto_parrafo.strip():
                                         palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
                                         if palabras_a_completar:
-                                            preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()], "porcentaje": pct_preg})
+                                            preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()]})
 
                         enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
 
@@ -1160,7 +1170,7 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON CONTROL DE TIEMPO ESTRICTO
+                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN PONDERADA ESTILO MOODLE
                     if act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1170,7 +1180,7 @@ else:
                             st.success(f"Examen entregado. Nota obtenida: {data_e['nota']}/10")
                         else:
                             if st.session_state.examen_en_curso != act['id']:
-                                if st.button(f"🚀 Comenzar Examen (Tenés {act['duracion_minutos']} minutos continuos)", key=f"start_ex_{act['id']}"):
+                                if st.button(f"🚀 Comenzar Examen (Tenés {act['duracion_minutos']} minutos)", key=f"start_ex_{act['id']}"):
                                     st.session_state.examen_en_curso = act['id']
                                     st.session_state.tiempo_inicio_examen = time.time()
                                     st.rerun()
@@ -1196,16 +1206,14 @@ else:
                                     for idx, p in enumerate(pregs):
                                         num_p = idx + 1
                                         t_p = p.get("tipo", "multiple_choice")
-                                        pct_p = p.get("porcentaje", round(100/len(pregs), 1))
                                         
-                                        st.markdown(f"**Pregunta N° {num_p}** ({pct_p}% del valor total)")
+                                        st.markdown(f"**Pregunta N° {num_p}**")
                                         
-                                        if t_p == "multiple_choice":
+                                        if t_p == "multiple_choice" or t_p == "verdadero_falso":
                                             st.markdown(f"*{p['enunciado']}*")
-                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
-                                        elif t_p == "verdadero_falso":
-                                            st.markdown(f"*{p['enunciado']}*")
-                                            rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
+                                            opciones_disp = [elec['texto'] for elec in p.get('opciones_config', [])]
+                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
+                                        
                                         elif t_p == "completar_espacios":
                                             st.markdown(f"*{p['enunciado']}*")
                                             correctas = p['palabras_correctas']
@@ -1218,24 +1226,30 @@ else:
                                             rtas_seleccionadas[idx] = resp_gaps
 
                                     if st.form_submit_button("Terminar y Enviar Examen"):
-                                        puntos_ponderados = 0
+                                        puntos_totales = 0.0
+                                        max_posible = len(pregs) * 100.0
+
                                         for idx, p in enumerate(pregs):
                                             t_p = p.get("tipo", "multiple_choice")
-                                            pct_p = float(p.get("porcentaje", 100/len(pregs)))
                                             
                                             if t_p in ["multiple_choice", "verdadero_falso"]:
-                                                if rtas_seleccionadas.get(idx) == p['correcta']:
-                                                    puntos_ponderados += pct_p
+                                                resp_elegida = rtas_seleccionadas.get(idx)
+                                                for elec in p.get('opciones_config', []):
+                                                    if elec['texto'] == resp_elegida:
+                                                        # Sumar puntos según el porcentaje asignado por el docente (ej: 100% otorga 100 puntos, 50% otorga 50, etc.)
+                                                        puntos_totales += float(elec.get('calificacion', 0.0))
+                                            
                                             elif t_p == "completar_espacios":
                                                 correctas = p['palabras_correctas']
                                                 gaps_al = rtas_seleccionadas.get(idx, {})
                                                 aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
                                                 if correctas:
-                                                    puntos_ponderados += pct_p * (aciertos_gaps / len(correctas))
+                                                    puntos_totales += 100.0 * (aciertos_gaps / len(correctas))
 
-                                        nota_calc = round(puntos_ponderados / 10, 2)
+                                        # Calcular nota final en escala de 1 a 10
+                                        nota_calc = round((puntos_totales / max_posible) * 10, 2) if max_posible > 0 else 0.0
                                         nota_calc = min(10.0, max(0.0, nota_calc))
-                                        dev_auto = f"Evaluación finalizada. Calificación ponderada: {nota_calc}/10."
+                                        dev_auto = f"Examen finalizado. Calificación obtenida: {nota_calc}/10."
 
                                         c.execute("""
                                             INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg, reescritura_autorizada)
