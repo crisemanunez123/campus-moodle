@@ -152,7 +152,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ---
+# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ROBUSTA ---
 conn = sqlite3.connect("campus_moodle.db", check_same_thread=False)
 c = conn.cursor()
 
@@ -171,6 +171,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
+# Auto-migración segura de columnas en usuarios
 try:
     cols_usr = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
     if "dni" not in cols_usr:
@@ -179,6 +180,8 @@ try:
         c.execute("ALTER TABLE usuarios ADD COLUMN domicilio TEXT DEFAULT ''")
     if "telefono" not in cols_usr:
         c.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT DEFAULT ''")
+    if "rol" not in cols_usr:
+        c.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT DEFAULT 'estudiante'")
     conn.commit()
 except Exception:
     pass
@@ -345,26 +348,35 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
-admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
-if not admin_check:
-    c.execute("""
-        INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
-        VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
-    """)
-    conn.commit()
-else:
-    c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
-    conn.commit()
+# --- ASEGURAR USUARIO ADMINISTRADOR GENERAL ('cristian') ---
+try:
+    admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
+    if not admin_check:
+        c.execute("""
+            INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
+            VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
+        """)
+        conn.commit()
+    else:
+        c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
+        conn.commit()
+except Exception:
+    pass
 
 # --- FUNCIONES AUXILIARES ---
 def get_config(clave, default=""):
-    r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
-    return r[0] if r else default
+    try:
+        r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
+        return r[0] if r else default
+    except Exception:
+        return default
 
 def set_config(clave, valor):
-    c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
-    conn.commit()
+    try:
+        c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
+        conn.commit()
+    except Exception:
+        pass
 
 def enviar_correo_smtp(destinatario, asunto, cuerpo):
     remitente = get_config("smtp_email", "").strip()
@@ -543,7 +555,7 @@ def render_pie_chart_svg(data_dict):
         legend_html += f"<div style='display:flex; align-items:center; margin-bottom:4px;'><span style='display:inline-block; width:12px; height:12px; background-color:{color}; border-radius:3px; margin-right:8px;'></span><b>{label}:</b>&nbsp;{val} ({pct:.1f}%)</div>"
         
     legend_html += "</div>"
-    return f"""<div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'><svg width='180' height='180' viewBox='0 0 200 200'>{''.join(slices)}</svg>{legend_html}</div>"""
+    return f"""<div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'><svg width='180' height='180' viewBox='0 0 200 200'>{''.join(slices)}</svg>#{legend_html}</div>"""
 
 def es_enlace_video(url):
     if not url:
