@@ -451,7 +451,7 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
                     parsed = json.loads(match.group(0))
                     pct_ia = int(parsed.get("pct_ia", 25))
                     pct_web = int(parsed.get("pct_web", 20))
-                    color = "#ef4444" if pct_ia > 65 or pct_web > 60 else ("#f59e0b" if pct_ia > 35 else "#22c55e")
+                    color = "#ef4444" if pct_ia > 50 else "#22c55e"
                     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": parsed.get("analisis", "Análisis completado."), "color": color}
         except Exception:
             pass
@@ -464,15 +464,8 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
     pct_ia = min(95, max(4, int((coincidencias * 14) + (long_prom * 3))))
     pct_web = min(90, max(6, int((len(palabras) % 30) + 12 + coincidencias * 8)))
     
-    if pct_ia >= 70 or pct_web >= 60:
-        dictamen = "Alta probabilidad de contenido asistido o generado mediante modelos computacionales."
-        color = "#ef4444"
-    elif pct_ia >= 40:
-        dictamen = "Sospecha moderada de estructuración asistida o paráfrasis automática."
-        color = "#f59e0b"
-    else:
-        dictamen = "Redacción original con patrones de escritura natural."
-        color = "#22c55e"
+    color = "#ef4444" if pct_ia > 50 else "#22c55e"
+    dictamen = "Alta probabilidad de contenido asistido o generado mediante modelos computacionales." if pct_ia > 50 else "Redacción original con patrones de escritura natural."
 
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
@@ -1061,10 +1054,10 @@ elif u["rol"] == "profesor":
                             st.success("Eliminado.")
                             st.rerun()
 
-        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS ---
+        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (CON PORCENTAJE DE IA Y COLOR CONDICIONAL) ---
         with tab_correccion:
             st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
-            st.caption("Revisá las entregas de los estudiantes, visualizá los porcentajes automáticos de autoría y volcá las calificaciones a la planilla central.")
+            st.caption("Revisá las entregas de los estudiantes, visualizá el porcentaje de IA utilizado (>50% en rojo, ≤50% en verde) y volcá las calificaciones a la planilla central.")
             
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as actividad_titulo, a.tipo as tipo_actividad, a.preguntas_json,
@@ -1083,8 +1076,21 @@ elif u["rol"] == "profesor":
                     aut_badge = " [🔓 Reescritura Autorizada]" if ent['reescritura_autorizada'] == 1 else ""
                     nota_txt = f"Nota: {ent['nota']}" if ent['nota'] is not None else "Sin calificar"
                     
-                    with st.expander(f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}){aut_badge} | {nota_txt}{t_min}"):
-                        st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
+                    # Calcular porcentaje de IA para mostrar en el título con color condicional
+                    texto_alumno_prev = ent['respuesta_data'] if ent['respuesta_data'] else ""
+                    texto_archivo_prev = extraer_texto_archivo_entrega(ent['archivo_ruta']) if ent['archivo_ruta'] else ""
+                    texto_auditoria_prev = texto_alumno_prev if texto_alumno_prev else texto_archivo_prev
+                    if not texto_auditoria_prev and ent['archivo_ruta']:
+                        texto_auditoria_prev = os.path.basename(str(ent['archivo_ruta']))
+                    
+                    rep_prev = analizar_antifraude_ia(texto_auditoria_prev, get_config("gemini_api_key", ""))
+                    pct_ia_val = rep_prev['pct_ia']
+                    color_ia = rep_prev['color'] # #ef4444 si >50, #22c55e si <=50
+                    
+                    titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: <span style='color:{color_ia}; font-weight:bold;'>{pct_ia_val}%</span> | {nota_txt}{t_min}{aut_badge}"
+
+                    with st.expander(titulo_expander, expanded=False):
+                        st.markdown(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
                         
                         if ent['preguntas_json'] and ent['respuesta_data']:
                             st.markdown("#### **Desglose de Respuestas del Examen:**")
@@ -1099,14 +1105,11 @@ elif u["rol"] == "profesor":
                             except Exception:
                                 st.write(f"Datos: {ent['respuesta_data']}")
                         else:
-                            texto_alumno = ent['respuesta_data'] if ent['respuesta_data'] else ""
-                            if texto_alumno:
-                                st.markdown(f"<div class='task-response-box'><b>📝 Texto enviado:</b><br>{texto_alumno}</div>", unsafe_allow_html=True)
+                            if texto_alumno_prev:
+                                st.markdown(f"<div class='task-response-box'><b>📝 Texto enviado:</b><br>{texto_alumno_prev}</div>", unsafe_allow_html=True)
 
-                            texto_archivo_extraido = ""
                             if ent['archivo_ruta'] and isinstance(ent['archivo_ruta'], str) and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
-                                texto_archivo_extraido = extraer_texto_archivo_entrega(ent['archivo_ruta'])
                                 with open(ent['archivo_ruta'], "rb") as f_adj:
                                     st.download_button(
                                         label=f"📥 Descargar Archivo Adjunto ({nombre_archivo_real})",
@@ -1115,19 +1118,12 @@ elif u["rol"] == "profesor":
                                         key=f"dl_corr_{ent['entrega_id']}"
                                     )
 
-                            texto_a_auditar = texto_alumno if texto_alumno else texto_archivo_extraido
-                            if not texto_a_auditar and ent['archivo_ruta']:
-                                texto_a_auditar = os.path.basename(str(ent['archivo_ruta']))
-
-                            api_key_auditoria = get_config("gemini_api_key", "")
-                            reporte = analizar_antifraude_ia(texto_a_auditar, api_key_auditoria)
-
                             st.markdown(f"""
-                            <div class='ai-detector-box' style='border-left: 5px solid {reporte['color']};'>
+                            <div class='ai-detector-box' style='border-left: 5px solid {color_ia};'>
                                 <h5 style='margin:0 0 6px 0; color:#1e293b;'>📊 Auditoría de Autenticidad y Similitud Académica</h5>
-                                • <b>Probabilidad de Contenido asistido:</b> <span style='color:{reporte['color']}; font-weight:bold; font-size:15px;'>{reporte['pct_ia']}%</span><br>
-                                • <b>Índice de Similitud con Fuentes Web:</b> <b>{reporte['pct_web']}%</b><br>
-                                • <b>Dictamen:</b> {reporte['dictamen']}
+                                • <b>Porcentaje de Contenido asistido por IA:</b> <span style='color:{color_ia}; font-weight:bold; font-size:16px;'>{pct_ia_val}%</span><br>
+                                • <b>Índice de Similitud con Fuentes Web:</b> <b>{rep_prev['pct_web']}%</b><br>
+                                • <b>Dictamen:</b> {rep_prev['dictamen']}
                             </div>
                             """, unsafe_allow_html=True)
 
