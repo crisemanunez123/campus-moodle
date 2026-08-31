@@ -88,13 +88,23 @@ st.markdown("""
     .timer-box {
         background: #dc2626;
         color: white !important;
-        padding: 12px;
+        padding: 14px;
         border-radius: 8px;
         font-weight: bold;
         font-size: 22px;
         text-align: center;
         margin-bottom: 15px;
-        box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);
+        box-shadow: 0 4px 6px rgba(220, 38, 38, 0.3);
+    }
+    .antifraude-warn {
+        background-color: #fef2f2;
+        border: 1px solid #fecaca;
+        color: #991b1b !important;
+        padding: 12px 16px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 600;
+        margin-bottom: 15px;
     }
     .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
     .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
@@ -1039,12 +1049,12 @@ elif u["rol"] == "profesor":
                                             st.markdown(f"**Pregunta N° {p_idx+1}:** {p_val.get('enunciado','')}")
                                             if p_val.get('tipo') in ['multiple_choice', 'verdadero_falso']:
                                                 for elec in p_val.get('opciones_config', []):
-                                                    st.write(f"○ {elec['texto']} (Valor: {elec['calificacion']}%)")
+                                                    st.write(f"○ {elec['texto']}")
                                             elif p_val.get('tipo') == 'completar_espacios':
                                                 st.write(f"Espacios a completar: {p_val.get('palabras_correctas')}")
                                             st.divider()
                                     except Exception:
-                                        st.warning("No se pudo cargar la vista previa del cuestionario.")
+                                        st.warning("No se pudo cargar la vista previa.")
 
                     with col_act_del:
                         if st.button("🗑️ Borrar", key=f"del_act_{a['id']}"):
@@ -1177,7 +1187,7 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.rerun()
 
-        # --- 4. PESTAÑA CALIFICACIONES (PLANILLA CENTRAL CON LISTADO DE ALUMNOS) ---
+        # --- 4. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
             st.markdown("### 📋 **Planilla Central de Calificaciones**")
             
@@ -1271,7 +1281,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE
+# 🎓 VISTA ESTUDIANTE (CON CRONÓMETRO ROJO Y AVISO ANTIFRAUDE)
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1303,7 +1313,7 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
+                    # SI ES EXAMEN / CUESTIONARIO CON AVISO Y CRONÓMETRO ROJO
                     if act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1319,6 +1329,9 @@ else:
                                     st.rerun()
 
                             if st.session_state.examen_en_curso == act['id']:
+                                # AVISO ANTIFRAUDE Y CRONÓMETRO ROJO
+                                st.markdown("<div class='antifraude-warn'>⚠️ ATENCIÓN: Si salís de la página o cambiás de pestaña durante el examen, el intento será finalizado y revisado por el docente.</div>", unsafe_allow_html=True)
+
                                 t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
                                 t_total = act['duracion_minutos'] * 60
                                 t_restante = max(0, t_total - t_pasado)
