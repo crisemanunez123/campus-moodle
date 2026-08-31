@@ -4,6 +4,9 @@ import pandas as pd
 import os
 import json
 import time
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date
 
 st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="wide")
@@ -14,20 +17,15 @@ os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
 # --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL ---
 st.markdown("""
 <style>
-    /* Fondo general educativo limpio con gradiente sutil */
     .stApp {
         background-color: #f3f6fa !important;
         background-image: linear-gradient(180deg, #edf2f7 0%, #f7f9fc 100%);
         color: #1e293b !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
-    
-    /* Textos y títulos institucionales */
     h1, h2, h3, h4, h5, h6, p, span, label {
         color: #0f172a !important;
     }
-    
-    /* Marca principal */
     .brand-title {
         font-size: 26px;
         font-weight: 800;
@@ -44,8 +42,6 @@ st.markdown("""
         display: inline-block;
         margin-top: 2px;
     }
-    
-    /* Botones principales estilo universitario */
     .stButton > button {
         background-color: #1b3a6b !important;
         color: #ffffff !important;
@@ -59,8 +55,6 @@ st.markdown("""
         color: #ffffff !important;
         box-shadow: 0 4px 12px rgba(27, 58, 107, 0.25);
     }
-    
-    /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
@@ -73,12 +67,9 @@ st.markdown("""
     .card-banner-2 { height: 110px; background: linear-gradient(135deg, #065f46 0%, #10b981 100%); }
     .card-banner-3 { height: 110px; background: linear-gradient(135deg, #701a75 0%, #d946ef 100%); }
     .card-banner-4 { height: 110px; background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); }
-    
     .course-card-body { padding: 16px; background: #ffffff !important; }
     .course-title { font-size: 17px; font-weight: 700; color: #1e3a8a !important; margin-bottom: 4px; }
     .course-cat { font-size: 13px; color: #64748b !important; }
-    
-    /* Timer y cajas de retroalimentación */
     .timer-box {
         background: #be123c;
         color: white !important;
@@ -176,7 +167,61 @@ CREATE TABLE IF NOT EXISTS entregas (
     FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
 )
 """)
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS configuracion (
+    clave TEXT PRIMARY KEY,
+    valor TEXT
+)
+""")
 conn.commit()
+
+# --- FUNCIONES DE EMAIL ---
+def get_config(clave, default=""):
+    r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
+    return r[0] if r else default
+
+def set_config(clave, valor):
+    c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
+    conn.commit()
+
+def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
+    remitente = get_config("smtp_email", "")
+    smtp_pass = get_config("smtp_password", "")
+    
+    if not remitente or not smtp_pass:
+        return False, "Credenciales SMTP no configuradas en el panel docente."
+
+    try:
+        msg = MIMEMultipart()
+        msg['From'] = f"Plataforma Educativa <{remitente}>"
+        msg['To'] = destinatario
+        msg['Subject'] = f"🎓 Acceso a tu curso: {curso_nombre}"
+
+        cuerpo = f"""Hola {nombre_alumno},
+
+Has sido matriculado/a exitosamente en el curso: {curso_nombre}
+
+Tus credenciales de acceso son:
+------------------------------------------
+👤 Usuario: {usuario}
+🔑 Contraseña: {clave}
+------------------------------------------
+
+Podés ingresar desde el navegador de tu computadora o celular.
+
+Saludos cordiales,
+Equipo Docente - Plataforma Educativa
+Created by Tec. Cristian Nuñez
+"""
+        msg.attach(MIMEText(cuerpo, 'plain'))
+        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
+        server.login(remitente, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True, "Correo enviado correctamente."
+    except Exception as e:
+        return False, f"Error al enviar correo: {str(e)}"
 
 # --- USUARIOS INICIALES ---
 if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
@@ -195,7 +240,7 @@ if "tiempo_inicio_examen" not in st.session_state:
     st.session_state.tiempo_inicio_examen = None
 
 def login(usuario, clave):
-    res = c.execute("SELECT id, username, nombre, email, rol, password FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
+    res = c.execute("SELECT id, username, nombre, email, rol FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
     if res:
         st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4]}
         return True
@@ -229,7 +274,7 @@ if st.session_state.user is None:
                     st.error("Credenciales incorrectas (Profesor inicial: `profesor`/`1234`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL CON GESTIÓN DE PERFIL ---
+# --- ENCABEZADO GLOBAL ---
 u = st.session_state.user
 col_h1, col_h2, col_h3 = st.columns([3, 5, 4])
 with col_h1:
@@ -272,12 +317,25 @@ st.divider()
 # ==============================================================================
 if u["rol"] == "profesor":
 
-    # BARRA LATERAL: ALTA DE OTROS PROFESORES
-    st.sidebar.markdown("### 🏛️ Administración del Campus")
+    st.sidebar.markdown("### 🏛️ Administración Docente")
+    
+    # Configuración de Servidor de Correo
+    with st.sidebar.expander("📧 Configurar Notificaciones por Email"):
+        with st.form("form_smtp_cfg"):
+            smtp_mail_act = get_config("smtp_email", "")
+            smtp_pass_act = get_config("smtp_password", "")
+            n_mail = st.text_input("Tu Gmail emisor", value=smtp_mail_act)
+            n_pass = st.text_input("Contraseña de Aplicación (16 letras)", value=smtp_pass_act, type="password", help="Generala en tu Cuenta Google > Seguridad > Contraseñas de aplicaciones.")
+            if st.form_submit_button("Guardar Configuración"):
+                set_config("smtp_email", n_mail.strip())
+                set_config("smtp_password", n_pass.strip())
+                st.success("Configuración guardada.")
+
+    # Crear Nuevo Docente
     with st.sidebar.expander("👨‍🏫 Crear Nuevo Usuario Profesor"):
         with st.form("form_crear_nuevo_profe", clear_on_submit=True):
             nom_p = st.text_input("Nombre y Apellido del Profesor")
-            mail_p = st.text_input("Email Institucional/Personal")
+            mail_p = st.text_input("Email Docente")
             usr_p = st.text_input("Usuario Docente")
             pwd_p = st.text_input("Contraseña", value="1234")
             if st.form_submit_button("Registrar Profesor"):
@@ -286,11 +344,11 @@ if u["rol"] == "profesor":
                         c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'profesor')",
                                   (usr_p, pwd_p, nom_p, mail_p))
                         conn.commit()
-                        st.success(f"Profesor {nom_p} registrado exitosamente.")
+                        st.success(f"Profesor {nom_p} registrado con éxito.")
                     except sqlite3.IntegrityError:
                         st.error("El nombre de usuario o email ya existe.")
 
-    # VISTA DASHBOARD (TARJETAS DE CURSOS)
+    # DASHBOARD DE CURSOS
     if st.session_state.materia_seleccionada_id is None:
         st.markdown("## **Vista General de Cursos**")
         col_btn1, col_btn2 = st.columns([1, 4])
@@ -305,7 +363,7 @@ if u["rol"] == "profesor":
                             c.execute("INSERT INTO catedras (nombre, codigo, categoria, profesor_id) VALUES (?, ?, ?, ?)",
                                       (nom_mat, cod_mat, cat_mat, u["id"]))
                             conn.commit()
-                            st.success("Materia creada correctamente.")
+                            st.success("Materia creada.")
                             st.rerun()
                         except sqlite3.IntegrityError:
                             st.error("Ya existe una materia con ese código.")
@@ -333,7 +391,7 @@ if u["rol"] == "profesor":
                         st.session_state.materia_seleccionada_id = row['id']
                         st.rerun()
 
-    # VISTA DENTRO DE UNA MATERIA
+    # DENTRO DE UNA MATERIA
     else:
         cat_id = st.session_state.materia_seleccionada_id
         res_cat = c.execute("SELECT nombre, codigo FROM catedras WHERE id = ?", (cat_id,)).fetchone()
@@ -347,7 +405,7 @@ if u["rol"] == "profesor":
 
         tab_curso, tab_participantes, tab_calificaciones = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones"])
 
-        # --- 1. PESTAÑA CURSO ---
+        # --- 1. PESTAÑA CURSO (CON EDICIÓN DE UNIDADES) ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -401,17 +459,29 @@ if u["rol"] == "profesor":
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (cat_id, sec_map[sec_elegida], tit_act, tipo_db, str(f_lim), dur_min, json_preguntas, desc_act, enlace_url))
                             conn.commit()
-                            st.success("Actividad publicada exitosamente.")
+                            st.success("Actividad publicada.")
                             st.rerun()
 
+            # Renderizado de Secciones con botones de EDITAR y BORRAR
             df_secciones = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             if df_secciones.empty:
                 st.info("No hay secciones creadas en este curso. Usa el botón '➕ Añadir Nueva Sección / Tema' arriba.")
             else:
                 for _, sec in df_secciones.iterrows():
-                    col_s_tit, col_s_del = st.columns([5, 1])
+                    col_s_tit, col_s_edit, col_s_del = st.columns([5, 1, 1])
                     with col_s_tit:
                         st.markdown(f"#### 📂 {sec['titulo']}")
+                    
+                    with col_s_edit:
+                        with st.popover("✏️ Editar", key=f"pop_edit_{sec['id']}"):
+                            with st.form(f"form_renombrar_{sec['id']}"):
+                                nuevo_nombre = st.text_input("Nuevo nombre:", value=sec['titulo'])
+                                if st.form_submit_button("Guardar") and nuevo_nombre:
+                                    c.execute("UPDATE secciones SET titulo = ? WHERE id = ?", (nuevo_nombre.strip(), sec['id']))
+                                    conn.commit()
+                                    st.success("Sección actualizada.")
+                                    st.rerun()
+
                     with col_s_del:
                         if st.button("🗑️ Borrar", key=f"del_sec_{sec['id']}"):
                             c.execute("DELETE FROM actividades WHERE seccion_id = ?", (sec['id'],))
@@ -428,7 +498,7 @@ if u["rol"] == "profesor":
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
                             st.markdown(f"> {ico} **{a['titulo']}** ({a['tipo']}){t_lbl} — *Vence: {a['fecha_limite']}*")
 
-        # --- 2. PESTAÑA PARTICIPANTES ---
+        # --- 2. PESTAÑA PARTICIPANTES (CON ENVÍO DE EMAIL AL REGISTRAR) ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -440,7 +510,7 @@ if u["rol"] == "profesor":
                         usr_a = st.text_input("Usuario Asignado")
                         pwd_a = st.text_input("Contraseña Asignada", value="1234")
                         
-                        if st.form_submit_button("Registrar y Matricular"):
+                        if st.form_submit_button("Registrar, Matricular y Notificar por Mail"):
                             if nom_a and mail_a and usr_a and pwd_a:
                                 try:
                                     c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')",
@@ -448,7 +518,13 @@ if u["rol"] == "profesor":
                                     nuevo_u_id = c.lastrowid
                                     c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, nuevo_u_id))
                                     conn.commit()
-                                    st.success(f"Alumno {nom_a} registrado y matriculado.")
+
+                                    # Enviar email automático
+                                    ok_mail, msg_mail = enviar_credenciales_alumno(mail_a.strip(), nom_a, nombre_materia, usr_a, pwd_a)
+                                    if ok_mail:
+                                        st.success(f"Alumno {nom_a} matriculado y credenciales enviadas a {mail_a}.")
+                                    else:
+                                        st.warning(f"Alumno registrado y matriculado. Nota del correo: {msg_mail}")
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     st.error("El usuario o email ya existe en el sistema.")
