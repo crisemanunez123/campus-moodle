@@ -169,7 +169,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
-# Migración para campos de clientes (DNI, domicilio, teléfono)
 try:
     cols_usr = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
     if "dni" not in cols_usr:
@@ -191,15 +190,6 @@ CREATE TABLE IF NOT EXISTS suscripciones_meses (
     pagado INTEGER DEFAULT 0,
     UNIQUE(profesor_id, anio, mes),
     FOREIGN KEY(profesor_id) REFERENCES usuarios(id)
-)
-""")
-
-c.execute("""
-CREATE TABLE IF NOT EXISTS tarifas_ipc (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    trimestre TEXT UNIQUE,
-    valor_cuota REAL,
-    porcentaje_ipc REAL
 )
 """)
 
@@ -455,10 +445,21 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
     conectores_ia = ["en conclusión", "en resumen", "es fundamental destacar", "por lo tanto", "cabe mencionar", "es crucial", "en primer lugar", "a modo de síntesis", "en definitiva", "asimismo"]
     coincidencias = sum(1 for c in conectores_ia if c in texto.lower())
     
-    pct_ia = min(95, max(4, int((coincidencias * 14) + 15)))
-    pct_web = min(90, max(6, int((len(palabras) % 30) + 12)))
-    color = "#ef4444" if pct_ia > 65 else ("#f59e0b" if pct_ia > 35 else "#22c55e")
-    return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": "Análisis de patrones sintácticos completado.", "color": color}
+    long_prom = sum(len(w) for w in palabras) / len(palabras) if palabras else 5
+    pct_ia = min(95, max(4, int((coincidencias * 14) + (long_prom * 3))))
+    pct_web = min(90, max(6, int((len(palabras) % 30) + 12 + coincidencias * 8)))
+    
+    if pct_ia >= 70 or pct_web >= 60:
+        dictamen = "Alta probabilidad de contenido asistido o generado mediante modelos computacionales."
+        color = "#ef4444"
+    elif pct_ia >= 40:
+        dictamen = "Sospecha moderada de estructuración asistida o paráfrasis automática."
+        color = "#f59e0b"
+    else:
+        dictamen = "Redacción original con patrones de escritura natural."
+        color = "#22c55e"
+
+    return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
 def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", api_key=""):
     if api_key:
@@ -528,6 +529,29 @@ def render_pie_chart_svg(data_dict):
         
     legend_html += "</div>"
     return f"""<div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'><svg width='180' height='180' viewBox='0 0 200 200'>{''.join(slices)}</svg>{legend_html}</div>"""
+
+def es_enlace_video(url):
+    if not url:
+        return False
+    patrones_video = [
+        r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\/",
+        r"(?:https?:\/\/)?(?:www\.)?vimeo\.com\/",
+        r"\.(?:mp4|webm|ogg|mov)$"
+    ]
+    return any(re.search(patron, url.strip(), re.IGNORECASE) for patron in patrones_video)
+
+def renderizar_recurso_multimedia(enlace):
+    if not enlace:
+        return
+    enlace_limpio = enlace.strip()
+    if es_enlace_video(enlace_limpio):
+        st.markdown("🎬 **Reproductor de Video:**")
+        try:
+            st.video(enlace_limpio)
+        except Exception:
+            st.markdown(f"🔗 **Enlace del video:** [{enlace_limpio}]({enlace_limpio})")
+    else:
+        st.markdown(f"🔗 **Enlace / Documento:** [{enlace_limpio}]({enlace_limpio})")
 
 # --- SESIÓN ---
 if "user" not in st.session_state:
@@ -684,7 +708,6 @@ if u["rol"] == "admin":
                     st.markdown(f"**Domicilio:** {cli['domicilio']} | **Email:** {cli['email']}")
                     st.markdown("#### 📅 **Control de Meses Abonados:**")
                     
-                    # Cargar estado de pagos para este cliente
                     cols_meses = st.columns(6)
                     for idx, mes in enumerate(meses_anio):
                         pagado_previo = c.execute("SELECT pagado FROM suscripciones_meses WHERE profesor_id = ? AND anio = ? AND mes = ?", (cli['id'], anio_actual, mes)).fetchone()
@@ -701,7 +724,6 @@ if u["rol"] == "admin":
                                 conn.commit()
 
                     st.divider()
-                    # Botón automático de WhatsApp (5 días antes del vencimiento o cobro)
                     tel_limpio = re.sub(r'\D', '', str(cli['telefono']))
                     mensaje_wa = f"Hola {cli['nombre']}, te escribimos desde la Plataforma Educativa para recordarte el vencimiento de tu suscripción mensual. ¡Muchas gracias!"
                     url_whatsapp = f"https://wa.me/{tel_limpio}?text={urllib.parse.quote(mensaje_wa)}"
@@ -720,11 +742,8 @@ if u["rol"] == "admin":
 
         if st.button("✨ Calcular y Actualizar Valores por IPC con IA"):
             with st.spinner("Analizando índices inflacionarios y actualizando tarifas..."):
-                apiKey = get_config("gemini_api_key", "")
                 trimestre_actual = f"Trimestre Q{(datetime.now().month-1)//3 + 1} {datetime.now().year}"
-                
-                # Simulación o llamada IA real
-                nuevo_pct = 12.5 # IPC estimado
+                nuevo_pct = 12.5
                 cuota_anterior = float(get_config("valor_cuota_base", "15000"))
                 cuota_actualizada = round(cuota_anterior * (1 + nuevo_pct/100), -2)
                 
@@ -1041,7 +1060,7 @@ elif u["rol"] == "profesor":
 
                 mensajes_priv = pd.read_sql("SELECT m.mensaje, m.fecha, m.emisor_id FROM mensajes_privados m WHERE m.catedra_id = ? AND ((m.emisor_id = ? AND m.receptor_id = ?) OR (m.emisor_id = ? AND m.receptor_id = ?)) ORDER BY m.id ASC", conn, params=(cat_id, u["id"], al_chat_id, al_chat_id, u["id"]))
                 for _, msg_p in mensajes_priv.iterrows():
-                    st.write(f"{'Yo' : 'Alumno'}: {msg_p['mensaje']}")
+                    st.write(f"{'Yo' if msg_p['emisor_id'] == u['id'] else 'Alumno'}: {msg_p['mensaje']}")
 
                 with st.form("form_chat_profe", clear_on_submit=True):
                     txt_m = st.text_area("Mensaje:")
