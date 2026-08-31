@@ -421,7 +421,7 @@ p, li {{ font-size: 14px; text-align: justify; }}
 </html>"""
     return html_pdf.encode('utf-8')
 
-# --- FUNCIONES DE ASISTENTE IA Y DETECTOR ---
+# --- FUNCIONES DE EMAIL ROBUSTA (STARTTLS 587 Y SSL 465) ---
 def get_config(clave, default=""):
     r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
     return r[0] if r else default
@@ -430,8 +430,61 @@ def set_config(clave, valor):
     c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
     conn.commit()
 
+def enviar_correo_smtp(destinatario, asunto, cuerpo):
+    remitente = get_config("smtp_email", "").strip()
+    smtp_pass = get_config("smtp_password", "").strip().replace(" ", "")
+    
+    if not remitente or not smtp_pass:
+        return False, "Faltan configurar el email emisor y la Contraseña de Aplicación de 16 letras en el panel docente."
+
+    msg = MIMEMultipart()
+    msg['From'] = f"Plataforma Educativa <{remitente}>"
+    msg['To'] = destinatario
+    msg['Subject'] = asunto
+    msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
+
+    # Intento 1: Puerto estándar 587 con STARTTLS
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(remitente, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True, "Correo enviado exitosamente."
+    except Exception as e1:
+        # Intento 2: Fallback a puerto 465 con SSL directo
+        try:
+            server_ssl = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
+            server_ssl.login(remitente, smtp_pass)
+            server_ssl.send_message(msg)
+            server_ssl.quit()
+            return True, "Correo enviado exitosamente (SSL)."
+        except Exception as e2:
+            return False, f"Error al conectar con Gmail: {str(e1)} | {str(e2)}"
+
+def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
+    asunto = f"🎓 Acceso a tu curso: {curso_nombre}"
+    cuerpo = f"""Hola {nombre_alumno},
+
+Has sido matriculado/a exitosamente en el curso: {curso_nombre}
+
+Tus credenciales de acceso son:
+------------------------------------------
+👤 Usuario: {usuario}
+🔑 Contraseña: {clave}
+------------------------------------------
+
+Podés ingresar desde el navegador de tu computadora o celular.
+
+Saludos cordiales,
+Equipo Docente - Plataforma Educativa
+Created by Tec. Cristian Nuñez
+"""
+    return enviar_correo_smtp(destinatario, asunto, cuerpo)
+
 def extraer_texto_archivo_entrega(ruta_archivo):
-    """Extrae texto legible de un archivo entregado para su auditoría"""
     if not ruta_archivo or not os.path.exists(ruta_archivo):
         return ""
     try:
@@ -604,44 +657,6 @@ def renderizar_recurso_multimedia(enlace):
             st.markdown(f"🔗 **Enlace del video:** [{enlace_limpio}]({enlace_limpio})")
     else:
         st.markdown(f"🔗 **Enlace / Documento:** [{enlace_limpio}]({enlace_limpio})")
-
-def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
-    remitente = get_config("smtp_email", "")
-    smtp_pass = get_config("smtp_password", "")
-    
-    if not remitente or not smtp_pass:
-        return False, "Credenciales SMTP no configuradas en el panel docente."
-
-    try:
-        msg = MIMEMultipart()
-        msg['From'] = f"Plataforma Educativa <{remitente}>"
-        msg['To'] = destinatario
-        msg['Subject'] = f"🎓 Acceso a tu curso: {curso_nombre}"
-
-        cuerpo = f"""Hola {nombre_alumno},
-
-Has sido matriculado/a exitosamente en el curso: {curso_nombre}
-
-Tus credenciales de acceso son:
-------------------------------------------
-👤 Usuario: {usuario}
-🔑 Contraseña: {clave}
-------------------------------------------
-
-Podés ingresar desde el navegador de tu computadora o celular.
-
-Saludos cordiales,
-Equipo Docente - Plataforma Educativa
-Created by Tec. Cristian Nuñez
-"""
-        msg.attach(MIMEText(cuerpo, 'plain'))
-        server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
-        server.login(remitente, smtp_pass)
-        server.send_message(msg)
-        server.quit()
-        return True, "Correo enviado correctamente."
-    except Exception as e:
-        return False, f"Error al enviar correo: {str(e)}"
 
 # --- USUARIOS INICIALES ---
 if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
@@ -839,16 +854,27 @@ if u["rol"] == "profesor":
                 set_config("gemini_api_key", gemini_in.strip())
                 st.success("Clave guardada exitosamente.")
 
-        with st.sidebar.expander("📧 Configurar Notificaciones por Email"):
-            with st.form("form_smtp_cfg"):
-                smtp_mail_act = get_config("smtp_email", "")
-                smtp_pass_act = get_config("smtp_password", "")
-                n_mail = st.text_input("Tu Gmail emisor", value=smtp_mail_act)
-                n_pass = st.text_input("Contraseña de Aplicación (16 letras)", value=smtp_pass_act, type="password")
-                if st.form_submit_button("Guardar Configuración"):
+        with st.sidebar.expander("📧 Configuración y Prueba de Email"):
+            smtp_mail_act = get_config("smtp_email", "")
+            smtp_pass_act = get_config("smtp_password", "")
+            n_mail = st.text_input("Tu Gmail emisor", value=smtp_mail_act, key="cfg_gmail_in")
+            n_pass = st.text_input("Contraseña de Aplicación (16 letras)", value=smtp_pass_act, type="password", key="cfg_pass_in")
+            
+            c_s1, c_s2 = st.columns(2)
+            with c_s1:
+                if st.button("💾 Guardar"):
                     set_config("smtp_email", n_mail.strip())
                     set_config("smtp_password", n_pass.strip())
-                    st.success("Configuración guardada.")
+                    st.success("Guardado.")
+            with c_s2:
+                if st.button("🧪 Probar Envío"):
+                    set_config("smtp_email", n_mail.strip())
+                    set_config("smtp_password", n_pass.strip())
+                    ok_t, msg_t = enviar_correo_smtp(n_mail.strip(), "Prueba de Plataforma Educativa", "Si recibiste este correo, la configuración SMTP funciona perfectamente.")
+                    if ok_t:
+                        st.success("¡Correo de prueba enviado con éxito!")
+                    else:
+                        st.error(f"Fallo al enviar: {msg_t}")
 
         with st.sidebar.expander("👨‍🏫 Crear Nuevo Usuario Profesor"):
             with st.form("form_crear_nuevo_profe", clear_on_submit=True):
@@ -1244,7 +1270,7 @@ if u["rol"] == "profesor":
                                     if ok_mail:
                                         st.success(f"Alumno {nom_a} matriculado y credenciales enviadas a {mail_a}.")
                                     else:
-                                        st.warning(f"Alumno registrado y matriculado. Nota del correo: {msg_mail}")
+                                        st.warning(f"Alumno registrado y matriculado. Aviso del correo: {msg_mail}")
                                     st.rerun()
                                 except sqlite3.IntegrityError:
                                     st.error("El usuario o email ya existe en el sistema.")
