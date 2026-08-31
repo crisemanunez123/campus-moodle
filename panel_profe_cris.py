@@ -6,6 +6,8 @@ import json
 import time
 import re
 import math
+import base64
+import urllib.request
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -14,7 +16,9 @@ from datetime import datetime, date
 st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="wide")
 
 CARPETA_ENTREGAS = "entregas_alumnos"
+CARPETA_PERFILES = "fotos_perfil"
 os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
+os.makedirs(CARPETA_PERFILES, exist_ok=True)
 
 # --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL Y ALTO CONTRASTE ---
 st.markdown("""
@@ -29,17 +33,17 @@ st.markdown("""
         color: #0f172a !important;
     }
     .brand-title {
-        font-size: 26px;
+        font-size: 24px;
         font-weight: 800;
         color: #1d4ed8 !important;
         letter-spacing: -0.5px;
     }
     .brand-badge {
-        font-size: 13px;
+        font-size: 12px;
         font-weight: 600;
         color: #0284c7 !important;
         background: #e0f2fe;
-        padding: 4px 10px;
+        padding: 3px 8px;
         border-radius: 12px;
         display: inline-block;
         margin-top: 2px;
@@ -113,6 +117,28 @@ st.markdown("""
     }
     .msg-box-in { background-color: #f1f5f9; border-left: 4px solid #64748b; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
     .msg-box-out { background-color: #e0f2fe; border-left: 4px solid #0284c7; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
+    
+    /* Perfil Header */
+    .user-profile-badge {
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 12px;
+    }
+    .user-avatar-circle {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background-color: #2563eb;
+        color: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 16px;
+        border: 2px solid #93c5fd;
+        object-fit: cover;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -127,9 +153,19 @@ CREATE TABLE IF NOT EXISTS usuarios (
     password TEXT,
     nombre TEXT,
     email TEXT,
-    rol TEXT
+    rol TEXT,
+    foto_perfil TEXT
 )
 """)
+
+# Migración para foto de perfil
+try:
+    cols_usuarios = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
+    if "foto_perfil" not in cols_usuarios:
+        c.execute("ALTER TABLE usuarios ADD COLUMN foto_perfil TEXT")
+        conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS catedras (
@@ -337,7 +373,7 @@ def render_pie_chart_svg(data_dict):
     """
     return svg_html
 
-# --- FUNCIONES DE UTILIDAD ---
+# --- FUNCIONES DE UTILIDAD Y IA ASISTENTE ---
 def get_config(clave, default=""):
     r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
     return r[0] if r else default
@@ -345,6 +381,55 @@ def get_config(clave, default=""):
 def set_config(clave, valor):
     c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
     conn.commit()
+
+def generar_plan_clase_ia(tema, nivel, detalle_adicional="", api_key=""):
+    """Generador pedagógico asistido con Gemini o motor integrado gratuito"""
+    if api_key:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
+        prompt = f"""Eres un profesor y pedagogo experto. Diseña una propuesta de clase completa, profesional y lista para el aula sobre:
+Tema: '{tema}'
+Nivel / Curso: '{nivel}'
+Detalles / Enfoque: '{detalle_adicional}'
+
+Estructura tu respuesta exactamente así:
+1. 🎯 Objetivos de Aprendizaje (claros y medibles).
+2. ⏱️ Estructura Temporal de la Clase:
+   - Inicio (15 min): Actividad disparadora y saberes previos.
+   - Desarrollo (45 min): Contenidos teóricos y debate guiado.
+   - Cierre (20 min): Puesta en común y síntesis.
+3. 📝 Actividad Práctica o Consigna para los Estudiantes.
+4. 💡 2 Preguntas Evaluativas sugeridas."""
+        
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(req, timeout=12) as response:
+                res_data = json.loads(response.read().decode())
+                return res_data["candidates"][0]["content"]["parts"][0]["text"]
+        except Exception as e:
+            st.warning(f"Aviso de conexión API Gemini: {e}. Se generó la propuesta con el motor pedagógico integrado.")
+
+    # Generador estructurado educativo de respaldo
+    return f"""### 📚 Propuesta de Clase: {tema}
+**Nivel / Destinatarios:** {nivel}
+**Fecha:** {datetime.now().strftime('%d/%m/%Y')}
+
+#### 🎯 1. Objetivos Pedagógicos:
+1. Comprender los conceptos esenciales y el marco teórico de **{tema}**.
+2. Analizar críticamente situaciones concretas y vincular los contenidos con la realidad actual.
+3. Desarrollar habilidades de argumentación y trabajo colaborativo.
+
+#### ⏱️ 2. Secuencia Didáctica de la Clase:
+- **Inicio (15 min):** Apertura mediante una pregunta disparadora sobre *{tema}*. Indagación de saberes previos y debate inicial.
+- **Desarrollo (45 min):** Exposición dialogada del docente, presentación de bibliografía y lectura compartida de fragmentos clave.
+- **Cierre (20 min):** Puesta en común de conclusiones, síntesis en el pizarrón y asignación de la consigna evaluativa.
+
+#### 📝 3. Consigna de Trabajo Práctico:
+Elaborar un informe breve analizando los ejes centrales de **{tema}**, incorporando un ejemplo real o caso práctico trabajado en clase.
+
+#### 💡 4. Preguntas Evaluativas Sugeridas:
+1. ¿Cuáles son los principios fundamentales que definen a {tema}?
+2. Explique cómo influyen estos conceptos en el contexto social o institucional."""
 
 def es_enlace_video(url):
     if not url:
@@ -424,9 +509,9 @@ if "tiempo_inicio_examen" not in st.session_state:
     st.session_state.tiempo_inicio_examen = None
 
 def login(usuario, clave):
-    res = c.execute("SELECT id, username, nombre, email, rol, password FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
+    res = c.execute("SELECT id, username, nombre, email, rol, password, foto_perfil FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
     if res:
-        st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4]}
+        st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4], "foto_perfil": res[6]}
         return True
     return False
 
@@ -458,27 +543,63 @@ if st.session_state.user is None:
                     st.error("Credenciales incorrectas (Profesor inicial: `profesor`/`1234`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL ---
+# --- ENCABEZADO GLOBAL CON PERFIL DE USUARIO Y FOTO ---
 u = st.session_state.user
-col_h1, col_h2, col_h3 = st.columns([3, 5, 4])
+col_h1, col_h2, col_h3 = st.columns([2.5, 4.5, 5])
 with col_h1:
     if st.button("🏛️ Área personal", key="btn_home"):
         st.session_state.materia_seleccionada_id = None
         st.rerun()
 
 with col_h2:
-    st.markdown(f"**🎓 Plataforma Educativa** &nbsp;|&nbsp; {u['nombre']} (`{u['rol'].capitalize()}`)<br><small style='color: #0369a1;'>Created by Tec. Cristian Nuñez</small>", unsafe_allow_html=True)
+    st.markdown(f"**🎓 Plataforma Educativa**<br><small style='color: #0369a1;'>Created by Tec. Cristian Nuñez</small>", unsafe_allow_html=True)
 
 with col_h3:
-    c_btn1, c_btn2 = st.columns([1, 1])
-    with c_btn1:
-        with st.popover("🔑 Cambiar Clave"):
+    col_u_info, col_u_menu = st.columns([3, 2])
+    with col_u_info:
+        iniciales_u = "".join([p[0] for p in u['nombre'].split()[:2]]).upper()
+        foto_path = u.get("foto_perfil")
+        
+        if foto_path and os.path.exists(foto_path):
+            with open(foto_path, "rb") as img_f:
+                b64_img = base64.b64encode(img_f.read()).decode()
+            avatar_html = f"<img src='data:image/png;base64,{b64_img}' class='user-avatar-circle' />"
+        else:
+            avatar_html = f"<div class='user-avatar-circle'>{iniciales_u}</div>"
+
+        st.markdown(f"""
+        <div class='user-profile-badge'>
+            <div style='text-align: right;'>
+                <span style='font-weight: 700; font-size: 14px;'>{u['nombre']}</span><br>
+                <small style='color: #64748b;'>{u['rol'].capitalize()}</small>
+            </div>
+            {avatar_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col_u_menu:
+        with st.popover("⚙️ Mi Cuenta"):
+            st.markdown("##### 👤 Opciones de Perfil")
+            
+            # Subir foto de perfil
+            foto_subida = st.file_uploader("Actualizar foto de perfil:", type=["jpg", "jpeg", "png"], key="upload_foto_header")
+            if foto_subida:
+                nueva_ruta_foto = os.path.join(CARPETA_PERFILES, f"user_{u['id']}_{foto_subida.name}")
+                with open(nueva_ruta_foto, "wb") as f_f:
+                    f_f.write(foto_subida.getbuffer())
+                c.execute("UPDATE usuarios SET foto_perfil = ? WHERE id = ?", (nueva_ruta_foto, u["id"]))
+                conn.commit()
+                st.session_state.user["foto_perfil"] = nueva_ruta_foto
+                st.success("Foto de perfil actualizada.")
+                st.rerun()
+
+            st.divider()
             with st.form("form_cambio_clave_usuario"):
-                st.markdown("##### Actualizar Contraseña")
+                st.markdown("##### 🔑 Cambiar Contraseña")
                 pass_act = st.text_input("Contraseña actual", type="password")
                 pass_n1 = st.text_input("Nueva contraseña", type="password")
                 pass_n2 = st.text_input("Confirmar nueva contraseña", type="password")
-                if st.form_submit_button("Guardar Cambios"):
+                if st.form_submit_button("Guardar Contraseña"):
                     chk = c.execute("SELECT id FROM usuarios WHERE id = ? AND password = ?", (u["id"], pass_act)).fetchone()
                     if not chk:
                         st.error("La contraseña actual es incorrecta.")
@@ -490,9 +611,9 @@ with col_h3:
                         c.execute("UPDATE usuarios SET password = ? WHERE id = ?", (pass_n1, u["id"]))
                         conn.commit()
                         st.success("¡Contraseña actualizada con éxito!")
-    with c_btn2:
-        if st.button("Cerrar sesión", key="btn_logout_top"):
-            logout()
+
+            if st.button("Cerrar sesión", key="btn_logout_top"):
+                logout()
 
 st.divider()
 
@@ -506,6 +627,14 @@ if u["rol"] == "profesor":
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
         
+        # Configuración de Clave Gemini
+        with st.sidebar.expander("🤖 Configuración de Asistente IA (Gemini)"):
+            gemini_act = get_config("gemini_api_key", "")
+            gemini_in = st.text_input("API Key de Google Gemini:", value=gemini_act, type="password", help="Obtené tu clave gratuita en aistudio.google.com")
+            if st.button("Guardar Clave Gemini"):
+                set_config("gemini_api_key", gemini_in.strip())
+                st.success("Clave de IA guardada.")
+
         with st.sidebar.expander("📧 Configurar Notificaciones por Email"):
             with st.form("form_smtp_cfg"):
                 smtp_mail_act = get_config("smtp_email", "")
@@ -597,8 +726,8 @@ if u["rol"] == "profesor":
                 st.session_state.materia_seleccionada_id = None
                 st.rerun()
 
-        tab_curso, tab_participantes, tab_calificaciones, tab_asistencia, tab_mensajes = st.tabs([
-            "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
+        tab_curso, tab_asistente_ia, tab_participantes, tab_calificaciones, tab_asistencia, tab_mensajes = st.tabs([
+            "📘 Curso", "🤖 Asistente IA para Clases", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
         ])
 
         # --- 1. PESTAÑA CURSO ---
@@ -886,7 +1015,36 @@ if u["rol"] == "profesor":
                                     st.success("Recurso eliminado.")
                                     st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES ---
+        # --- 2. PESTAÑA ASISTENTE IA PARA CLASES (NUEVA) ---
+        with tab_asistente_ia:
+            st.markdown("### 🤖 **Asistente Pedagógico con Inteligencia Artificial**")
+            st.caption("Planificá unidades, consignas de trabajo, debates para foros y clases enteras en segundos con IA.")
+            
+            c_ia1, c_ia2 = st.columns([1, 1])
+            with c_ia1:
+                tema_ia = st.text_input("Tema de la clase a planificar:", placeholder="Ej: Poder Judicial y Garantías Constitucionales")
+                nivel_ia = st.text_input("Curso / Nivel educativo:", value=res_cat[1] if res_cat[1] else "Secundario / 5to Año")
+                detalle_ia = st.text_area("Enfoque o especificaciones adicionales:", placeholder="Ej: Enfatizar casos prácticos, debate participativo y trabajo en equipo...")
+                
+                btn_ia = st.button("✨ Generar Plan de Clase con IA", use_container_width=True)
+
+            with c_ia2:
+                if btn_ia and tema_ia:
+                    with st.spinner("🤖 La IA está diseñando la propuesta didáctica..."):
+                        clave_gemini = get_config("gemini_api_key", "")
+                        plan_resultado = generar_plan_clase_ia(tema_ia, nivel_ia, detalle_ia, clave_gemini)
+                        st.session_state["ultimo_plan_ia"] = plan_resultado
+
+                if "ultimo_plan_ia" in st.session_state:
+                    st.markdown("#### 📄 **Propuesta Generada:**")
+                    st.markdown(st.session_state["ultimo_plan_ia"])
+                    st.download_button(
+                        label="📥 Descargar Plan de Clase (.txt)",
+                        data=st.session_state["ultimo_plan_ia"],
+                        file_name=f"plan_clase_{tema_ia.replace(' ','_')}.txt"
+                    )
+
+        # --- 3. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -990,7 +1148,7 @@ if u["rol"] == "profesor":
                             st.success(f"{al_row['nombre']} desmatriculado/a.")
                             st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES (DOBLE TABLA: PERÍODOS + ACTIVIDADES DE CURSADA) ---
+        # --- 4. PESTAÑA CALIFICACIONES (DOBLE TABLA: PERÍODOS + ACTIVIDADES) ---
         with tab_calificaciones:
             st.markdown("### 📋 **1. Registro Oficial de Períodos e Informes (TEA / TEP / TED)**")
             
@@ -1052,7 +1210,6 @@ if u["rol"] == "profesor":
                     """, (cat_id, al_cal_id)).fetchone()
 
                     opciones_informe = ["-", "TEA", "TEP", "TED"]
-                    
                     val_inf1 = datos_act[0] if datos_act and datos_act[0] in opciones_informe else "-"
                     val_inf2 = datos_act[2] if datos_act and datos_act[2] in opciones_informe else "-"
 
@@ -1087,7 +1244,6 @@ if u["rol"] == "profesor":
                 st.divider()
                 st.markdown("### 📊 **2. Planilla de Seguimiento de Cursada y Actividades por Módulo**")
                 
-                # Actividades evaluativas cargadas
                 acts_curso = pd.read_sql("""
                     SELECT id, titulo, tipo FROM actividades 
                     WHERE catedra_id = ? AND (tipo IN ('Tarea', 'Cuestionario') OR (tipo = 'Foro' AND es_obligatorio = 1))
@@ -1251,7 +1407,7 @@ if u["rol"] == "profesor":
                                 st.success("Calificación guardada exitosamente.")
                                 st.rerun()
 
-        # --- 4. PESTAÑA ASISTENCIA ---
+        # --- 5. PESTAÑA ASISTENCIA ---
         with tab_asistencia:
             st.markdown("### **Control y Registro de Asistencia**")
             
@@ -1347,7 +1503,7 @@ if u["rol"] == "profesor":
                     else:
                         st.info("Aún no hay registros de asistencia para graficar.")
 
-        # --- 5. PESTAÑA MENSAJES PRIVADOS ---
+        # --- 6. PESTAÑA MENSAJES PRIVADOS ---
         with tab_mensajes:
             st.markdown("### ✉️ **Mensajería Privada con Estudiantes**")
             
