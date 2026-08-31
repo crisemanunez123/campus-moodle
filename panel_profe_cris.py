@@ -355,17 +355,20 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
-admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
-if not admin_check:
-    c.execute("""
-        INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
-        VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
-    """)
-    conn.commit()
-else:
-    c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
-    conn.commit()
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL (BLINDADO) ---
+try:
+    admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
+    if not admin_check:
+        c.execute("""
+            INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
+            VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
+        """)
+        conn.commit()
+    else:
+        c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
+        conn.commit()
+except Exception:
+    pass
 
 # --- FUNCIONES AUXILIARES ---
 def get_config(clave, default=""):
@@ -1007,7 +1010,7 @@ elif u["rol"] == "profesor":
 
                 acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                 for _, a in acts.iterrows():
-                    col_act_view, col_act_mod, col_act_del = st.columns([4, 1, 1])
+                    col_act_view, col_act_mod, col_act_del = st.columns([3, 1, 1])
                     with col_act_view:
                         with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
                             st.write(a['descripcion'])
@@ -1147,10 +1150,10 @@ elif u["rol"] == "profesor":
                                 st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
                                 st.rerun()
 
-        # --- 3. PESTAÑA PARTICIPANTES (MATRICULACIÓN SIMPLIFICADA Y LISTADO COMPLETO ABAJO) ---
+        # --- 3. PESTAÑA PARTICIPANTES (MATRICULACIÓN SIMPLIFICADA Y LISTADO ABAJO) ---
         with tab_participantes:
             st.markdown("### **👥 Gestión de Participantes y Alumnos**")
-            st.caption("Matriculá nuevos alumnos ingresando únicamente su nombre, apellido, usuario y contraseña. Toda la información del curso se gestiona desde aquí.")
+            st.caption("Matriculá nuevos alumnos ingresando únicamente su nombre, apellido, usuario y contraseña.")
             
             with st.form("form_alta_alumno_simple", clear_on_submit=True):
                 st.markdown("##### ➕ Matricular Nuevo Alumno")
@@ -1164,7 +1167,6 @@ elif u["rol"] == "profesor":
                 if st.form_submit_button("Matricular Alumno"):
                     if nom_a.strip() and usr_a.strip() and pwd_a.strip():
                         try:
-                            # Registrar usuario alumno con email genérico interno
                             mail_gen = f"{usr_a.strip()}@campus.edu"
                             c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_gen))
                             nuevo_u_id = c.lastrowid
