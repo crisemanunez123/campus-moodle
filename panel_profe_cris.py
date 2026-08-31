@@ -414,25 +414,6 @@ def enviar_correo_smtp(destinatario, asunto, cuerpo):
         except Exception as e2:
             return False, f"Error al conectar con Gmail: {str(e1)} | {str(e2)}"
 
-def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
-    asunto = f"🎓 Acceso a tu curso: {curso_nombre}"
-    cuerpo = f"""Hola {nombre_alumno},
-
-Has sido matriculado/a exitosamente en el curso: {curso_nombre}
-
-Tus credenciales de acceso son:
-------------------------------------------
-👤 Usuario: {usuario}
-🔑 Contraseña: {clave}
-------------------------------------------
-
-Podés ingresar desde el navegador de tu computadora o celular.
-
-Saludos cordiales,
-Equipo Docente - Plataforma Educativa
-"""
-    return enviar_correo_smtp(destinatario, asunto, cuerpo)
-
 def extraer_texto_archivo_entrega(ruta_archivo):
     if not ruta_archivo or not isinstance(ruta_archivo, str) or not os.path.exists(ruta_archivo):
         return ""
@@ -1026,7 +1007,7 @@ elif u["rol"] == "profesor":
 
                 acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                 for _, a in acts.iterrows():
-                    col_act_view, col_act_del = st.columns([3, 1, 1])
+                    col_act_view, col_act_mod, col_act_del = st.columns([4, 1, 1])
                     with col_act_view:
                         with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
                             st.write(a['descripcion'])
@@ -1052,13 +1033,11 @@ elif u["rol"] == "profesor":
                                     except Exception:
                                         st.warning("No se pudo cargar la vista previa.")
 
-                    # MODIFICAR CUESTIONARIO O RECURSO
-                    with col_act_del:
+                    with col_act_mod:
                         with st.popover("✏️ Modificar"):
                             with st.form(f"form_mod_act_{a['id']}"):
                                 nuevo_tit = st.text_input("Título", value=a['titulo'])
                                 nueva_desc = st.text_area("Descripción", value=a['descripcion'] if a['descripcion'] else "")
-                                
                                 nuevo_json = a['preguntas_json']
                                 if a['tipo'] == "Cuestionario":
                                     st.markdown("**Estructura de Preguntas (JSON):**")
@@ -1168,38 +1147,58 @@ elif u["rol"] == "profesor":
                                 st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
                                 st.rerun()
 
-        # --- 3. PESTAÑA PARTICIPANTES ---
+        # --- 3. PESTAÑA PARTICIPANTES (MATRICULACIÓN SIMPLIFICADA Y LISTADO COMPLETO ABAJO) ---
         with tab_participantes:
-            st.markdown("### **Matriculación de Alumnos**")
-            with st.form("form_alta_alumno_mail", clear_on_submit=True):
-                nom_a = st.text_input("Nombre y Apellido Completo")
-                mail_a = st.text_input("Email Personal del Alumno")
-                usr_a = st.text_input("Usuario Asignado")
-                pwd_a = st.text_input("Contraseña Asignada", value="1234")
-                if st.form_submit_button("Registrar, Matricular y Notificar por Mail"):
-                    if nom_a and mail_a and usr_a and pwd_a:
+            st.markdown("### **👥 Gestión de Participantes y Alumnos**")
+            st.caption("Matriculá nuevos alumnos ingresando únicamente su nombre, apellido, usuario y contraseña. Toda la información del curso se gestiona desde aquí.")
+            
+            with st.form("form_alta_alumno_simple", clear_on_submit=True):
+                st.markdown("##### ➕ Matricular Nuevo Alumno")
+                col_ma1, col_ma2 = st.columns(2)
+                with col_ma1:
+                    nom_a = st.text_input("Nombre y Apellido del Alumno *")
+                    usr_a = st.text_input("Usuario de Acceso *")
+                with col_ma2:
+                    pwd_a = st.text_input("Contraseña Asignada *", value="1234")
+                
+                if st.form_submit_button("Matricular Alumno"):
+                    if nom_a.strip() and usr_a.strip() and pwd_a.strip():
                         try:
-                            c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_a.strip()))
+                            # Registrar usuario alumno con email genérico interno
+                            mail_gen = f"{usr_a.strip()}@campus.edu"
+                            c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_gen))
                             nuevo_u_id = c.lastrowid
                             c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, nuevo_u_id))
                             conn.commit()
-                            enviar_credenciales_alumno(mail_a.strip(), nom_a, nombre_materia, usr_a, pwd_a)
-                            st.success(f"Alumno {nom_a} matriculado y notificado.")
+                            st.success(f"¡Alumno {nom_a} matriculado con éxito!")
                             st.rerun()
                         except sqlite3.IntegrityError:
-                            st.error("El usuario o email ya existe.")
+                            st.error("El nombre de usuario ya existe en el sistema.")
+                    else:
+                        st.error("Por favor complete los campos obligatorios.")
 
             st.divider()
-            st.markdown("### **Lista de Matriculados**")
-            df_matriculados = pd.read_sql("SELECT u.id as user_id, u.nombre, u.email, u.username FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
-            if not df_matriculados.empty:
+            st.markdown("### 📋 **Listado General de Alumnos Matriculados**")
+            df_matriculados = pd.read_sql("""
+                SELECT u.id as user_id, u.nombre, u.username, u.password
+                FROM matriculas m 
+                JOIN usuarios u ON m.estudiante_id = u.id 
+                WHERE m.catedra_id = ?
+                ORDER BY u.nombre ASC
+            """, conn, params=(cat_id,))
+
+            if df_matriculados.empty:
+                st.info("No hay alumnos matriculados en esta cátedra.")
+            else:
                 for _, al_row in df_matriculados.iterrows():
-                    col_m1, col_m2 = st.columns([4, 1])
-                    col_m1.markdown(f"👤 **{al_row['nombre']}** (`{al_row['email']}`)")
-                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
-                        c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
-                        conn.commit()
-                        st.rerun()
+                    col_p1, col_p2 = st.columns([5, 1])
+                    col_p1.markdown(f"👤 **{al_row['nombre']}** &nbsp;|&nbsp; 🔑 Usuario: `{al_row['username']}` &nbsp;|&nbsp; 🔒 Contraseña: `{al_row['password']}`")
+                    with col_p2:
+                        if st.button("🗑️ Dar de Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
+                            c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
+                            conn.commit()
+                            st.success("Alumno dado de baja.")
+                            st.rerun()
 
         # --- 4. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
