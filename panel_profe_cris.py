@@ -938,7 +938,7 @@ elif u["rol"] == "profesor":
 
                         if "Examen" in tipo_modulo:
                             st.markdown("---")
-                            st.markdown("### 🛠️ **Configuración del Examen Estilo Moodle (Opciones y Porcentajes)**")
+                            st.markdown("### 🛠️ **Configuración del Examen Estilo Moodle (Opciones y Calificaciones)**")
                             dur_min = st.number_input("⏱️ Tiempo límite (minutos):", min_value=1, max_value=240, value=15)
                             cant_pregs = st.number_input("Cantidad de preguntas:", min_value=1, max_value=25, value=2)
                             
@@ -1026,7 +1026,7 @@ elif u["rol"] == "profesor":
 
                 acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                 for _, a in acts.iterrows():
-                    col_act_view, col_act_del = st.columns([5, 1])
+                    col_act_view, col_act_del = st.columns([3, 1, 1])
                     with col_act_view:
                         with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
                             st.write(a['descripcion'])
@@ -1038,11 +1038,9 @@ elif u["rol"] == "profesor":
                                 else:
                                     renderizar_recurso_multimedia(a['enlace_archivo'])
 
-                            # VISTA PREVIA DEL CUESTIONARIO PARA EL DOCENTE
                             if a['tipo'] == "Cuestionario" and a['preguntas_json']:
-                                with st.popover("👀 Vista Previa (Cómo lo ve el alumno)"):
+                                with st.popover("👀 Vista Previa"):
                                     st.markdown(f"#### ⏱️ Examen: {a['titulo']}")
-                                    st.caption(f"Duración: {a['duracion_minutos']} minutos")
                                     try:
                                         pregs_prev = json.loads(a['preguntas_json'])
                                         for p_idx, p_val in enumerate(pregs_prev):
@@ -1050,11 +1048,27 @@ elif u["rol"] == "profesor":
                                             if p_val.get('tipo') in ['multiple_choice', 'verdadero_falso']:
                                                 for elec in p_val.get('opciones_config', []):
                                                     st.write(f"○ {elec['texto']}")
-                                            elif p_val.get('tipo') == 'completar_espacios':
-                                                st.write(f"Espacios a completar: {p_val.get('palabras_correctas')}")
                                             st.divider()
                                     except Exception:
                                         st.warning("No se pudo cargar la vista previa.")
+
+                    # MODIFICAR CUESTIONARIO O RECURSO
+                    with col_act_del:
+                        with st.popover("✏️ Modificar"):
+                            with st.form(f"form_mod_act_{a['id']}"):
+                                nuevo_tit = st.text_input("Título", value=a['titulo'])
+                                nueva_desc = st.text_area("Descripción", value=a['descripcion'] if a['descripcion'] else "")
+                                
+                                nuevo_json = a['preguntas_json']
+                                if a['tipo'] == "Cuestionario":
+                                    st.markdown("**Estructura de Preguntas (JSON):**")
+                                    nuevo_json = st.text_area("Editar JSON de preguntas", value=a['preguntas_json'] if a['preguntas_json'] else "[]", height=150)
+
+                                if st.form_submit_button("Guardar Cambios"):
+                                    c.execute("UPDATE actividades SET titulo = ?, descripcion = ?, preguntas_json = ? WHERE id = ?", (nuevo_tit.strip(), nueva_desc, nuevo_json, a['id']))
+                                    conn.commit()
+                                    st.success("Modificado con éxito.")
+                                    st.rerun()
 
                     with col_act_del:
                         if st.button("🗑️ Borrar", key=f"del_act_{a['id']}"):
@@ -1281,7 +1295,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE (CON CRONÓMETRO ROJO Y AVISO ANTIFRAUDE)
+# 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1313,7 +1327,7 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON AVISO Y CRONÓMETRO ROJO
+                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
                     if act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1329,7 +1343,6 @@ else:
                                     st.rerun()
 
                             if st.session_state.examen_en_curso == act['id']:
-                                # AVISO ANTIFRAUDE Y CRONÓMETRO ROJO
                                 st.markdown("<div class='antifraude-warn'>⚠️ ATENCIÓN: Si salís de la página o cambiás de pestaña durante el examen, el intento será finalizado y revisado por el docente.</div>", unsafe_allow_html=True)
 
                                 t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
