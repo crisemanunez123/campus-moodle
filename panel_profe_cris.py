@@ -428,7 +428,7 @@ if u["rol"] == "profesor":
 
         tab_curso, tab_participantes, tab_calificaciones, tab_asistencia = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia"])
 
-        # --- 1. PESTAÑA CURSO (CREADOR CON 'Pregunta N°' Y OPCIONES DINÁMICAS) ---
+        # --- 1. PESTAÑA CURSO ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -474,7 +474,6 @@ if u["rol"] == "profesor":
                             
                             if tipo_p == "Opción Múltiple":
                                 enun = st.text_input(f"Enunciado de la Pregunta N° {num_preg}:", placeholder="Ej: ¿Qué órgano ejerce el poder judicial?", key=f"enun_mc_{i}")
-                                
                                 cant_opciones = st.number_input(f"Cantidad de opciones para la Pregunta N° {num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}")
                                 
                                 ops_cargadas = []
@@ -538,7 +537,7 @@ if u["rol"] == "profesor":
                             st.success("¡Actividad / Examen publicado exitosamente!")
                             st.rerun()
 
-            # LISTA DE SECCIONES CON EDICIÓN COMPLETA (NOMBRE, ORDEN, ELIMINAR)
+            # LISTA DE SECCIONES CON EDICIÓN COMPLETA
             df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             if df_secciones.empty:
                 st.info("No hay secciones creadas en este curso. Usa el botón '➕ Añadir Nueva Sección / Unidad' arriba.")
@@ -568,21 +567,27 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES DENTRO DE LA SECCIÓN
+                    # ACTIVIDADES CON FORMATO PLEGABLE (SOLO SE ABREN AL HACER CLIC)
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
                     else:
                         for _, a in acts.iterrows():
-                            col_act_info, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
+                            col_act_main, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
                             
                             ico = "⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else "🔗")
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
                             
-                            with col_act_info:
-                                st.markdown(f"> {ico} **{a['titulo']}** ({a['tipo']}){t_lbl} — *Vence: {a['fecha_limite']}*")
-                                if a['descripcion']:
-                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;📌 *Consigna:* {a['descripcion']}")
+                            with col_act_main:
+                                with st.expander(f"{ico} {a['titulo']} ({a['tipo']}){t_lbl} — Vence: {a['fecha_limite']}"):
+                                    if a['descripcion']:
+                                        st.markdown(f"**📌 Consigna / Contenido:**")
+                                        st.markdown(a['descripcion'])
+                                    else:
+                                        st.caption("*(Sin descripción consignada)*")
+                                    
+                                    if a['enlace_archivo']:
+                                        st.markdown(f"🔗 **Enlace adjunto:** [{a['enlace_archivo']}]({a['enlace_archivo']})")
                             
                             with col_act_edit:
                                 with st.popover("✏️ Editar", key=f"pop_act_edit_{a['id']}"):
