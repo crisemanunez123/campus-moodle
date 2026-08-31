@@ -1275,6 +1275,17 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.success("Asistencia guardada.")
 
+                st.divider()
+                st.markdown("### 📊 **Resumen de Asistencia General**")
+                resumen_asist = []
+                for _, al in alumnos_asist.iterrows():
+                    total_clases = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()[0]
+                    total_presentes = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ? AND estado = 'Presente'", (cat_id, al['id'])).fetchone()[0]
+                    total_ausentes = total_clases - total_presentes
+                    pct = round((total_presentes / total_clases) * 100, 1) if total_clases > 0 else 0.0
+                    resumen_asist.append({"Estudiante": al['nombre'], "Clases": total_clases, "Presentes": total_presentes, "Ausentes": total_ausentes, "% Asistencia": f"{pct}%"})
+                st.dataframe(pd.DataFrame(resumen_asist), use_container_width=True, hide_index=True)
+
         # --- 6. PESTAÑA MENSAJES ---
         with tab_mensajes:
             st.markdown("### ✉️ **Buzón de Mensajes Privados**")
@@ -1478,7 +1489,6 @@ else:
     with tab_al_notas:
         st.markdown("### 📊 **Mis Calificaciones y Devoluciones**")
         
-        # 1. Notas de Períodos
         per_al = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (materia_id, u['id'])).fetchone()
         if per_al:
             c1, c2, c3 = st.columns(3)
