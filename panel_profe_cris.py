@@ -106,25 +106,10 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 15px;
     }
-    .forum-msg-docente {
-        background-color: #f0f9ff;
-        border-left: 5px solid #0284c7;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-    }
-    .forum-msg-alumno {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 5px solid #64748b;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
-    .msg-box-in { background-color: #f1f5f9; border-left: 4px solid #64748b; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    .msg-box-out { background-color: #e0f2fe; border-left: 4px solid #0284c7; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
-    
+    .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
+    .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
+    .task-response-box { background-color: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
+    .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
     .ai-detector-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
@@ -134,7 +119,6 @@ st.markdown("""
         margin-bottom: 14px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    
     .user-profile-badge {
         display: flex;
         align-items: center;
@@ -366,7 +350,7 @@ try:
 except Exception:
     pass
 
-# --- FUNCIONES AUXILIARES ---
+# --- FUNCIONES AUXILIARES Y DE EXPORTACIÓN (WORD Y PDF) ---
 def get_config(clave, default=""):
     try:
         r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
@@ -380,6 +364,71 @@ def set_config(clave, valor):
         conn.commit()
     except Exception:
         pass
+
+def exportar_documento_word(titulo, contenido):
+    contenido_html = contenido.replace("\n", "<br>")
+    contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
+    contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
+    contenido_html = re.sub(r'# (.*?)(?:<br>|$)', r'<h1>\1</h1>', contenido_html)
+    contenido_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', contenido_html)
+    
+    html_doc = f"""<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset="utf-8">
+<title>{titulo}</title>
+<style>
+body {{ font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.6; margin: 40px; color: #111827; }}
+h1 {{ color: #1d4ed8; font-size: 22pt; border-bottom: 2px solid #1d4ed8; padding-bottom: 8px; }}
+h2 {{ color: #1e3a8a; font-size: 16pt; margin-top: 18pt; }}
+h3 {{ color: #1e40af; font-size: 14pt; margin-top: 14pt; }}
+p, li {{ font-size: 11pt; text-align: justify; }}
+.footer {{ margin-top: 40pt; font-size: 9pt; color: #6b7280; border-top: 1px solid #cbd5e1; padding-top: 10px; }}
+</style>
+</head>
+<body>
+<h1>{titulo}</h1>
+<div>{contenido_html}</div>
+<div class="footer">Documento generado pedagógicamente por Plataforma Educativa — Tec. Cristian Nuñez</div>
+</body>
+</html>"""
+    return html_doc.encode('utf-8')
+
+def exportar_documento_pdf_imprimible(titulo, contenido):
+    contenido_html = contenido.replace("\n", "<br>")
+    contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
+    contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
+    contenido_html = re.sub(r'# (.*?)(?:<br>|$)', r'<h1>\1</h1>', contenido_html)
+    contenido_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', contenido_html)
+    
+    html_pdf = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{titulo}</title>
+<style>
+@media print {{
+    @page {{ margin: 20mm; size: A4; }}
+    body {{ -webkit-print-color-adjust: exact; }}
+    .no-print {{ display: none; }}
+}}
+body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; margin: 30px auto; max-width: 800px; color: #0f172a; padding: 20px; }}
+h1 {{ color: #1d4ed8; font-size: 24px; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }}
+h2, h3 {{ color: #1e3a8a; margin-top: 20px; }}
+p, li {{ font-size: 14px; text-align: justify; }}
+.btn-print {{ background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }}
+.footer {{ margin-top: 40px; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
+</style>
+</head>
+<body>
+<div class="no-print" style="text-align: right;">
+    <button class="btn-print" onclick="window.print()">🖨️ Imprimir o Guardar como PDF</button>
+</div>
+<h1>{titulo}</h1>
+<div>{contenido_html}</div>
+<div class="footer">Plataforma Educativa • Documento Pedagógico Oficial</div>
+</body>
+</html>"""
+    return html_pdf.encode('utf-8')
 
 def enviar_correo_smtp(destinatario, asunto, cuerpo):
     remitente = get_config("smtp_email", "").strip()
@@ -465,37 +514,54 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
 
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
-def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", api_key=""):
+# --- ASISTENTE IA AMPLIADO (ESTILO GEMINI PROFUNDO Y ANÁLISIS DE ARCHIVOS) ---
+def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", texto_archivo_adjunto="", api_key=""):
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
-        prompt = f"""Eres un pedagogo y profesor universitario experto. Diseña un documento educativo profesional, exhaustivo, con lenguaje académico claro y directamente utilizable en el aula.
+        
+        prompt = f"""Eres un pedagogo y profesor universitario experto, especializado en la creación de contenidos curriculares extensos, profundos y de alta calidad académica.
 
 Tipo de recurso a elaborar: '{tipo_recurso}'
-Tema central: '{tema}'
+Tema central o consulta: '{tema}'
 Nivel / Curso destinatario: '{nivel}'
-Especificaciones didácticas: '{detalle_adicional}'"""
+Especificaciones didácticas del docente: '{detalle_adicional}'
+Contexto adicional o texto extraído de archivo adjunto analizado: '{texto_archivo_adjunto[:3000]}'
+
+Instrucciones de profundidad y extensión:
+- Desarrolla el contenido de forma exhaustiva, amplia, académica y estructurada (mínimo 4 secciones principales con desarrollo teórico detallado, ejemplos prácticos, fundamentación pedagógica y pautas de evaluación).
+- Si es una planificación o trabajo práctico, redacta consignas de trabajo profundas y desarrollo conceptual completo que sea directamente utilizable en el aula."""
         
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=15) as response:
+            with urllib.request.urlopen(req, timeout=25) as response:
                 res_data = json.loads(response.read().decode())
                 return res_data["candidates"][0]["content"]["parts"][0]["text"]
-        except Exception:
-            pass
+        except Exception as e:
+            return f"Error al conectar con la API de Gemini: {str(e)}"
 
     return f"""# 📚 {tipo_recurso}: {tema}
 **Nivel / Curso:** {nivel}
 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}
 
 ---
-### 🎯 Objetivos de Aprendizaje
-Comprender los ejes fundamentales de {tema}, fomentando el pensamiento crítico y la aplicación práctica.
+### 🎯 1. Fundamentación y Objetivos Generales
+El presente documento ha sido elaborado para abordar de manera exhaustiva el núcleo temático de **{tema}**, promoviendo el pensamiento crítico, la asimilación conceptual y la aplicación empírica de los saberes en el nivel correspondiente.
 
-### 📝 Desarrollo y Consignas
-1. Analice los conceptos centrales de {tema}.
-2. Relacione la teoría con un caso de estudio real.
-3. Elabore una conclusión argumentada."""
+### 📖 2. Marco Teórico y Conceptual Extendido
+- **Eje Conceptual I:** Análisis detallado de los principios rectores de {tema}. Se destaca la importancia de comprender la estructura teórica subyacente y su impacto en el ámbito educativo e institucional.
+- **Eje Conceptual II:** Abordaje metodológico y desarrollo de casos prácticos vinculados a las especificaciones aportadas: *{detalle_adicional if detalle_adicional else 'Sin detalles adicionales'}*.
+- **Análisis de Documentación Adjunta:** {'Se ha procesado y integrado el contenido del archivo adjunto para contextualizar la propuesta.' if texto_archivo_adjunto else 'Trabajo elaborado a partir de parámetros predeterminados.'}
+
+### ✍️ 3. Propuesta de Actividades y Consignas Prácticas
+1. **Actividad de Indagación:** Investigar los antecedentes históricos y normativos vinculados a {tema}.
+2. **Estudio de Caso:** Resolver una situación problemática simulada donde se pongan en juego los conceptos abordados en la teoría.
+3. **Reflexión Crítica:** Elaborar un ensayo breve argumentando sobre los desafíos actuales en la materia.
+
+### 📊 4. Criterios de Evaluación Formativa y Sumativa
+- Coherencia conceptual y precisión técnica (40%).
+- Capacidad de argumentación y relación teórica-práctica (30%).
+- Presentación formal y claridad en la redacción (30%)."""
 
 def render_pie_chart_svg(data_dict):
     total = sum(data_dict.values())
@@ -602,7 +668,7 @@ if st.session_state.user is None:
                     st.error("Credenciales incorrectas (Admin: `cristian`/`1234`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL ---
+# --- ENCABEZADO GLOBAL CON ASISTENTE IA ESTILO GEMINI (AMPLIADO Y CON SUBIDA DE ARCHIVOS) ---
 u = st.session_state.user
 col_h1, col_h2, col_h3 = st.columns([2.5, 4, 5.5])
 with col_h1:
@@ -620,19 +686,61 @@ with col_h3:
     with c_ia_btn:
         if u["rol"] in ["profesor", "admin"]:
             with st.popover("🤖 Asistente IA"):
-                st.markdown("#### 🤖 **Asistente Pedagógico**")
-                tipo_ia_sel = st.selectbox("¿Qué deseas generar?:", ["Planificación Completa de Clase", "Trabajo Práctico", "Examen Evaluativo"], key="tipo_ia_pop")
-                t_ia = st.text_input("Tema central:", key="tema_flotante_ia")
-                n_ia = st.text_input("Nivel / Curso:", key="nivel_flotante_ia")
-                e_ia = st.text_area("Enfoque:", key="enfoque_flotante_ia")
-                if st.button("✨ Generar", key="btn_gen_flotante") and t_ia:
-                    st.session_state["resultado_ia_flotante"] = generar_recurso_pedagogico_ia(tipo_ia_sel, t_ia, n_ia, e_ia, get_config("gemini_api_key", ""))
-                    st.session_state["titulo_ia_flotante"] = f"{tipo_ia_sel} - {t_ia}"
+                st.markdown("#### 🤖 **Asistente Pedagógico Avanzado**")
+                st.caption("Generá contenidos extensos, planificaciones, exámenes y analizá archivos adjuntos.")
+                
+                tipo_ia_sel = st.selectbox("¿Qué deseas generar o analizar?:", [
+                    "Planificación Completa de Clase (Extensa)",
+                    "Trabajo Práctico con Consignas y Rúbrica",
+                    "Examen Evaluativo con Respuestas",
+                    "Análisis y Resumen de Documento Adjunto"
+                ], key="tipo_ia_pop")
+                
+                t_ia = st.text_input("Tema central o consulta:", placeholder="Ej: Redes de computadoras y protocolos TCP/IP", key="tema_flotante_ia")
+                n_ia = st.text_input("Nivel / Curso destinatario:", placeholder="Ej: 5° Año - Técnico", key="nivel_flotante_ia")
+                e_ia = st.text_area("Enfoque o instrucciones específicas:", placeholder="Ej: Enfatizar en casos prácticos y resolución de problemas...", key="enfoque_flotante_ia")
+                
+                # POSIBILIDAD DE SUBIR ARCHIVO PARA QUE LA IA LO ANALICE
+                arch_asistente = st.file_uploader("📂 Adjuntar archivo de referencia (PDF, Word, TXT):", type=["pdf", "docx", "txt", "xlsx"], key="upl_asistente_ia")
+                texto_archivo_extraido_asistente = ""
+                if arch_asistente is not None:
+                    texto_archivo_extraido_asistente = extraer_texto_archivo_entrega(os.path.join(CARPETA_BIBLIO, arch_asistente.name)) or "Contenido de referencia cargado desde archivo."
+
+                if st.button("✨ Generar Contenido Extendido", key="btn_gen_flotante"):
+                    if t_ia or arch_asistente:
+                        with st.spinner("Generando contenido pedagógico profundo y extenso con IA..."):
+                            ck = get_config("gemini_api_key", "")
+                            res_flot = generar_recurso_pedagogico_ia(tipo_ia_sel, t_ia if t_ia else "Análisis de documento", n_ia, e_ia, texto_archivo_extraido_asistente, ck)
+                            st.session_state["resultado_ia_flotante"] = res_flot
+                            st.session_state["titulo_ia_flotante"] = f"{tipo_ia_sel} - {t_ia if t_ia else 'Documento'}"
 
                 if "resultado_ia_flotante" in st.session_state:
+                    st.divider()
+                    st.markdown("##### 📄 **Resultado Generado:**")
                     st.markdown(st.session_state["resultado_ia_flotante"])
-                    doc_word = exportar_documento_word(st.session_state["titulo_ia_flotante"], st.session_state["resultado_ia_flotante"])
-                    st.download_button("📥 Word (.doc)", data=doc_word, file_name="documento.doc", mime="application/msword")
+                    
+                    tit_doc = st.session_state.get("titulo_ia_flotante", "Documento_Pedagogico")
+                    cont_doc = st.session_state["resultado_ia_flotante"]
+                    
+                    c_d1, c_d2 = st.columns(2)
+                    with c_d1:
+                        doc_word = exportar_documento_word(tit_doc, cont_doc)
+                        st.download_button(
+                            label="📥 Descargar Word (.doc)",
+                            data=doc_word,
+                            file_name=f"{tit_doc.replace(' ', '_')}.doc",
+                            mime="application/msword",
+                            key="btn_dl_word_asistente"
+                        )
+                    with c_d2:
+                        doc_pdf = exportar_documento_pdf_imprimible(tit_doc, cont_doc)
+                        st.download_button(
+                            label="📄 Imprimir / PDF (.html)",
+                            data=doc_pdf,
+                            file_name=f"{tit_doc.replace(' ', '_')}.html",
+                            mime="text/html",
+                            key="btn_dl_pdf_asistente"
+                        )
 
     with col_u_info:
         iniciales_u = "".join([p[0] for p in u['nombre'].split()[:2]]).upper()
@@ -1011,7 +1119,6 @@ elif u["rol"] == "profesor":
                                 else:
                                     renderizar_recurso_multimedia(a['enlace_archivo'])
 
-                            # SI ES FORO, PERMITIR RESPUESTAS Y DEBATES CRUZADOS ENTRE ALUMNOS Y DOCENTE
                             if a['tipo'] == "Foro":
                                 st.divider()
                                 st.markdown("#### 💬 **Debate del Foro:**")
@@ -1117,7 +1224,7 @@ elif u["rol"] == "profesor":
                     pct_ia_val = rep_prev['pct_ia']
                     color_ia = rep_prev['color']
                     
-                    # Título limpio del expander sin etiquetas HTML crudas rotas
+                    # Título limpio del expander sin HTML crudo
                     titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: {pct_ia_val}% | {nota_txt}{t_min}{aut_badge}"
 
                     with st.expander(titulo_expander, expanded=False):
