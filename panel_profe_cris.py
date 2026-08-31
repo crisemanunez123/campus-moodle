@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     username TEXT UNIQUE,
     password TEXT,
     nombre TEXT,
-    email TEXT,
+    email TEXT UNIQUE,
     rol TEXT,
     foto_perfil TEXT,
     dni TEXT DEFAULT '',
@@ -355,7 +355,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL (BLINDADO) ---
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
 try:
     admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
     if not admin_check:
@@ -1155,19 +1155,19 @@ elif u["rol"] == "profesor":
             st.markdown("### **👥 Gestión de Participantes y Alumnos**")
             st.caption("Matriculá nuevos alumnos ingresando únicamente su nombre, apellido, usuario y contraseña.")
             
-            with st.form("form_alta_alumno_simple", clear_on_submit=True):
+            with st.form(f"form_alta_alumno_simple_{cat_id}", clear_on_submit=True):
                 st.markdown("##### ➕ Matricular Nuevo Alumno")
                 col_ma1, col_ma2 = st.columns(2)
                 with col_ma1:
-                    nom_a = st.text_input("Nombre y Apellido del Alumno *")
-                    usr_a = st.text_input("Usuario de Acceso *")
+                    nom_a = st.text_input("Nombre y Apellido del Alumno *", key=f"nom_a_{cat_id}")
+                    usr_a = st.text_input("Usuario de Acceso *", key=f"usr_a_{cat_id}")
                 with col_ma2:
-                    pwd_a = st.text_input("Contraseña Asignada *", value="1234")
+                    pwd_a = st.text_input("Contraseña Asignada *", value="1234", key=f"pwd_a_{cat_id}")
                 
                 if st.form_submit_button("Matricular Alumno"):
                     if nom_a.strip() and usr_a.strip() and pwd_a.strip():
                         try:
-                            mail_gen = f"{usr_a.strip()}@campus.edu"
+                            mail_gen = f"{usr_a.strip()}_{int(time.time())}@campus.edu"
                             c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_gen))
                             nuevo_u_id = c.lastrowid
                             c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, nuevo_u_id))
