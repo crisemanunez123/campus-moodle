@@ -86,8 +86,6 @@ st.markdown("""
     .q-wrong { background-color: #ffe4e6; border-left: 5px solid #e11d48; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #881337 !important; }
     .task-response-box { background-color: #f1f5f9; border-left: 5px solid #1b3a6b; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
     .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
-    
-    /* Estilos del Foro */
     .forum-msg-docente {
         background-color: #e0f2fe;
         border-left: 5px solid #0284c7;
@@ -231,7 +229,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- FUNCIONES DE EMAIL ---
+# --- FUNCIONES DE UTILIDAD ---
 def get_config(clave, default=""):
     r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
     return r[0] if r else default
@@ -239,6 +237,29 @@ def get_config(clave, default=""):
 def set_config(clave, valor):
     c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
     conn.commit()
+
+def es_enlace_video(url):
+    if not url:
+        return False
+    patrones_video = [
+        r"(?:https?:\/\/)?(?:www\.)?(?:youtube\.com|youtu\.be)\/",
+        r"(?:https?:\/\/)?(?:www\.)?vimeo\.com\/",
+        r"\.(?:mp4|webm|ogg|mov)$"
+    ]
+    return any(re.search(patron, url.strip(), re.IGNORECASE) for patron in patrones_video)
+
+def renderizar_recurso_multimedia(enlace):
+    if not enlace:
+        return
+    enlace_limpio = enlace.strip()
+    if es_enlace_video(enlace_limpio):
+        st.markdown("🎬 **Reproductor de Video:**")
+        try:
+            st.video(enlace_limpio)
+        except Exception:
+            st.markdown(f"🔗 **Enlace del video:** [{enlace_limpio}]({enlace_limpio})")
+    else:
+        st.markdown(f"🔗 **Enlace adjunto:** [{enlace_limpio}]({enlace_limpio})")
 
 def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
     remitente = get_config("smtp_email", "")
@@ -481,13 +502,13 @@ if u["rol"] == "profesor":
                         "💬 Foro (Debate e Interacción)",
                         "⏱️ Cuestionario / Examen Dinámico por Tiempo",
                         "📝 Tarea (Entrega de Archivo/Texto)",
-                        "📁 Archivo / URL"
+                        "📁 Archivo / URL / Video"
                     ])
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / foro / examen", placeholder="Ej: Foro de Debate / Examen Parcial / Tarea 1")
-                    desc_act = st.text_area("Descripción / Consigna / Tema del debate", placeholder="Instrucciones para los participantes...")
+                    tit_act = st.text_input("Título de la actividad / foro / examen / video", placeholder="Ej: Video Clase Magistral / Examen Parcial")
+                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los participantes...")
                     f_lim = st.date_input("Fecha Límite", min_value=date.today())
 
                     dur_min = 0
@@ -555,7 +576,7 @@ if u["rol"] == "profesor":
                                             "distractores": lista_distr
                                         })
 
-                    enlace_url = st.text_input("Enlace web / URL externa (opcional)")
+                    enlace_url = st.text_input("Enlace web / URL de Video (YouTube, Vimeo, MP4, etc.)", placeholder="https://www.youtube.com/watch?v=...")
 
                     if st.button("🚀 Publicar Actividad / Recurso en el Curso"):
                         if not tit_act.strip():
@@ -612,7 +633,7 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES CON FORMATO PLEGABLE
+                    # ACTIVIDADES CON FORMATO PLEGABLE Y REPRODUCTOR DE VIDEO
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
@@ -620,21 +641,22 @@ if u["rol"] == "profesor":
                         for _, a in acts.iterrows():
                             col_act_main, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
                             
-                            ico = "💬" if a['tipo'] == 'Foro' else ("⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else "🔗"))
+                            ico = "💬" if a['tipo'] == 'Foro' else ("⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(a['enlace_archivo']) else "🔗")))
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
                             
                             with col_act_main:
                                 with st.expander(f"{ico} {a['titulo']} ({a['tipo']}){t_lbl} — Vence: {a['fecha_limite']}"):
                                     if a['descripcion']:
-                                        st.markdown(f"**📌 Consigna / Tema:**")
+                                        st.markdown(f"**📌 Consigna / Descripción:**")
                                         st.markdown(a['descripcion'])
                                     else:
                                         st.caption("*(Sin descripción consignada)*")
                                     
+                                    # Renderizador de video o enlace
                                     if a['enlace_archivo']:
-                                        st.markdown(f"🔗 **Enlace adjunto:** [{a['enlace_archivo']}]({a['enlace_archivo']})")
+                                        renderizar_recurso_multimedia(a['enlace_archivo'])
 
-                                    # SI ES UN FORO: RENDERIZAR MENSAJES Y CUADRO DE INTERACCIÓN
+                                    # SI ES UN FORO: RENDERIZAR MENSAJES
                                     if a['tipo'] == 'Foro':
                                         st.divider()
                                         st.markdown("#### 💬 **Participaciones en el Foro:**")
@@ -693,7 +715,7 @@ if u["rol"] == "profesor":
                                             st.markdown("**Preguntas y Estructura del Examen (JSON):**")
                                             n_preg_json = st.text_area("Editar preguntas", value=a['preguntas_json'] if a['preguntas_json'] else "[]")
 
-                                        n_enlace = st.text_input("Enlace URL / Archivo", value=a['enlace_archivo'] if a['enlace_archivo'] else "")
+                                        n_enlace = st.text_input("Enlace URL / Video / Archivo", value=a['enlace_archivo'] if a['enlace_archivo'] else "")
 
                                         sec_opts = {r['titulo']: r['id'] for _, r in df_secciones.iterrows()}
                                         sec_actual_nom = [k for k, v in sec_opts.items() if v == a['seccion_id']]
@@ -1007,7 +1029,7 @@ if u["rol"] == "profesor":
                 st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE (CON PARTICIPACIÓN EN EL FORO)
+# 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1035,7 +1057,7 @@ else:
             acts_al = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(s['id'],))
             
             for _, act in acts_al.iterrows():
-                ico = "💬" if act['tipo'] == 'Foro' else ("⏱️" if act['tipo'] == 'Cuestionario' else ("📄" if act['tipo'] == 'Tarea' else "🔗"))
+                ico = "💬" if act['tipo'] == 'Foro' else ("⏱️" if act['tipo'] == 'Cuestionario' else ("📄" if act['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(act['enlace_archivo']) else "🔗")))
                 
                 # Renderizado específico según tipo
                 if act['tipo'] == "Foro":
@@ -1043,6 +1065,9 @@ else:
                         st.markdown(f"**📌 Tema de debate / Consigna:**")
                         st.write(act['descripcion'])
                         
+                        if act['enlace_archivo']:
+                            renderizar_recurso_multimedia(act['enlace_archivo'])
+
                         st.divider()
                         st.markdown("#### 💬 **Hilo de Debate:**")
                         
@@ -1087,6 +1112,9 @@ else:
                     with st.expander(f"{ico} {act['titulo']} ({act['tipo']}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
                         st.write(f"**Consigna:** {act['descripcion']}")
                         
+                        if act['enlace_archivo']:
+                            renderizar_recurso_multimedia(act['enlace_archivo'])
+
                         if ya_rendido:
                             data_ent = ent_al.iloc[0]
                             st.success(f"Entregado el: {data_ent['fecha_entrega']}")
