@@ -269,11 +269,21 @@ CREATE TABLE IF NOT EXISTS mensajes_privados (
     catedra_id INTEGER,
     mensaje TEXT,
     fecha TEXT,
+    leido INTEGER DEFAULT 0,
     FOREIGN KEY(emisor_id) REFERENCES usuarios(id),
     FOREIGN KEY(receptor_id) REFERENCES usuarios(id),
     FOREIGN KEY(catedra_id) REFERENCES catedras(id)
 )
 """)
+
+# Migración para campo leido en mensajes privados
+try:
+    cols_msg = [col[1] for col in c.execute("PRAGMA table_info(mensajes_privados)").fetchall()]
+    if "leido" not in cols_msg:
+        c.execute("ALTER TABLE mensajes_privados ADD COLUMN leido INTEGER DEFAULT 0")
+        conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS calificaciones_periodos (
@@ -845,7 +855,7 @@ if u["rol"] == "profesor":
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
         
-        with st.sidebar.expander("🤖 Configuración del Asistente"):
+        with st.sidebar.expander("🤖 Configuración de Asistente"):
             gemini_act = get_config("gemini_api_key", "")
             gemini_in = st.text_input("Clave de Asistente:", value=gemini_act, type="password")
             if st.button("Guardar Clave"):
