@@ -6,6 +6,7 @@ import json
 import time
 import re
 import smtplib
+import matplotlib.pyplot as plt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date
@@ -143,16 +144,6 @@ CREATE TABLE IF NOT EXISTS catedras (
 )
 """)
 
-try:
-    cols_cat = [col[1] for col in c.execute("PRAGMA table_info(catedras)").fetchall()]
-    if "curso_anio" not in cols_cat:
-        c.execute("ALTER TABLE catedras ADD COLUMN curso_anio TEXT")
-    if "escuela" not in cols_cat:
-        c.execute("ALTER TABLE catedras ADD COLUMN escuela TEXT")
-    conn.commit()
-except Exception:
-    pass
-
 c.execute("""
 CREATE TABLE IF NOT EXISTS secciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -180,14 +171,6 @@ CREATE TABLE IF NOT EXISTS actividades (
     FOREIGN KEY(seccion_id) REFERENCES secciones(id)
 )
 """)
-
-try:
-    cols_act = [col[1] for col in c.execute("PRAGMA table_info(actividades)").fetchall()]
-    if "es_obligatorio" not in cols_act:
-        c.execute("ALTER TABLE actividades ADD COLUMN es_obligatorio INTEGER DEFAULT 0")
-        conn.commit()
-except Exception:
-    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS matriculas (
@@ -253,6 +236,22 @@ CREATE TABLE IF NOT EXISTS mensajes_privados (
     FOREIGN KEY(emisor_id) REFERENCES usuarios(id),
     FOREIGN KEY(receptor_id) REFERENCES usuarios(id),
     FOREIGN KEY(catedra_id) REFERENCES catedras(id)
+)
+""")
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS calificaciones_periodos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    catedra_id INTEGER,
+    estudiante_id INTEGER,
+    informe_avance_1 TEXT DEFAULT '-',
+    cuatrimestre_1 REAL,
+    informe_avance_2 TEXT DEFAULT '-',
+    cuatrimestre_2 REAL,
+    calificacion_final_dic REAL,
+    UNIQUE(catedra_id, estudiante_id),
+    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
+    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
 )
 """)
 
@@ -528,7 +527,7 @@ if u["rol"] == "profesor":
             "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
         ])
 
-        # --- 1. PESTAÑA CURSO (CON RECURSO 'BIBLIOGRAFÍA') ---
+        # --- 1. PESTAÑA CURSO ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -917,9 +916,9 @@ if u["rol"] == "profesor":
                             st.success(f"{al_row['nombre']} desmatriculado/a.")
                             st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES ---
+        # --- 3. PESTAÑA CALIFICACIONES (CON CUATRIMESTRES, INFORMES Y GRÁFICO DE TORTA) ---
         with tab_calificaciones:
-            st.markdown("### **Libro Central de Calificaciones**")
+            st.markdown("### 📈 **Libro Central de Calificaciones y Períodos**")
             
             alumnos_curso = pd.read_sql("""
                 SELECT u.id, u.nombre, u.email 
@@ -927,89 +926,140 @@ if u["rol"] == "profesor":
                 WHERE m.catedra_id = ? ORDER BY u.nombre ASC
             """, conn, params=(cat_id,))
 
-            acts_curso = pd.read_sql("""
-                SELECT id, titulo, tipo FROM actividades 
-                WHERE catedra_id = ? AND (tipo IN ('Tarea', 'Cuestionario') OR (tipo = 'Foro' AND es_obligatorio = 1))
-                ORDER BY id ASC
-            """, conn, params=(cat_id,))
-
             if alumnos_curso.empty:
                 st.info("No hay alumnos matriculados en esta cátedra.")
-            elif acts_curso.empty:
-                st.info("No hay actividades evaluativas creadas (tareas, exámenes o foros obligatorios).")
             else:
                 tabla_calif = []
+                finales_para_grafico = []
+
                 for _, al in alumnos_curso.iterrows():
                     iniciales = "".join([part[0] for part in al['nombre'].split()[:2]]).upper()
+                    
+                    # Leer datos oficiales de períodos
+                    per = c.execute("""
+                        SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic
+                        FROM calificaciones_periodos
+                        WHERE catedra_id = ? AND estudiante_id = ?
+                    """, (cat_id, al['id'])).fetchone()
+
+                    inf1 = per[0] if per and per[0] else "-"
+                    c1_val = f"{per[1]:.2f}" if per and per[1] is not None else "-"
+                    inf2 = per[2] if per and per[2] else "-"
+                    c2_val = f"{per[3]:.2f}" if per and per[3] is not None else "-"
+                    fin_dic = f"{per[4]:.2f}" if per and per[4] is not None else "-"
+
+                    if per and per[4] is not None:
+                        finales_para_grafico.append(per[4])
+                    elif per and per[3] is not None:
+                        finales_para_grafico.append(per[3])
+                    elif per and per[1] is not None:
+                        finales_para_grafico.append(per[1])
+
                     fila = {
                         "Avatar": iniciales,
                         "Nombre / Apellido(s)": al['nombre'],
-                        "Dirección de correo": al['email']
+                        "1° Informe Avance": inf1,
+                        "1° Cuatrimestre": c1_val,
+                        "2° Informe Avance": inf2,
+                        "2° Cuatrimestre": c2_val,
+                        "Calificación Final (Dic)": fin_dic
                     }
-                    total_notas = []
-                    for _, act in acts_curso.iterrows():
-                        res_nota = c.execute("SELECT nota FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (act['id'], al['id'])).fetchone()
-                        if res_nota and res_nota[0] is not None:
-                            fila[act['titulo']] = f"{res_nota[0]:.2f}"
-                            total_notas.append(res_nota[0])
-                        else:
-                            fila[act['titulo']] = "-"
-                    
-                    fila["Promedio"] = f"{(sum(total_notas)/len(total_notas)):.2f}" if total_notas else "-"
                     tabla_calif.append(fila)
 
                 df_render = pd.DataFrame(tabla_calif)
-                
-                prom_cols = {"Avatar": "∑", "Nombre / Apellido(s)": "Promedio general", "Dirección de correo": ""}
-                for _, act in acts_curso.iterrows():
-                    todas_notas = [float(x[act['titulo']]) for x in tabla_calif if x[act['titulo']] != "-"]
-                    prom_cols[act['titulo']] = f"{(sum(todas_notas)/len(todas_notas)):.2f}" if todas_notas else "-"
-                
-                todas_prom = [float(x["Promedio"]) for x in tabla_calif if x["Promedio"] != "-"]
-                prom_cols["Promedio"] = f"{(sum(todas_prom)/len(todas_prom)):.2f}" if todas_prom else "-"
-                
-                df_render = pd.concat([df_render, pd.DataFrame([prom_cols])], ignore_index=True)
                 st.dataframe(df_render, use_container_width=True, hide_index=True)
 
-            st.divider()
-            st.markdown("### **Revisión Detallada, Calificación de Tareas y Foros**")
-            
-            foros_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo = 'Foro' AND es_obligatorio = 1", conn, params=(cat_id,))
-            if not foros_eval.empty and not alumnos_curso.empty:
-                st.markdown("#### 💬 **Calificar Participación en Foros Obligatorios:**")
-                for _, f_eval in foros_eval.iterrows():
-                    with st.expander(f"Calificar: {f_eval['titulo']} (Foro Evaluativo)"):
-                        for _, al_f in alumnos_curso.iterrows():
-                            c_f1, c_f2, c_f3 = st.columns([3, 2, 3])
-                            nota_f_act = c.execute("SELECT nota, devolucion FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (f_eval['id'], al_f['id'])).fetchone()
-                            
-                            c_f1.write(f"👤 **{al_f['nombre']}**")
-                            mensajes_al_cant = c.execute("SELECT COUNT(*) FROM foro_mensajes WHERE actividad_id = ? AND usuario_id = ?", (f_eval['id'], al_f['id'])).fetchone()[0]
-                            c_f2.caption(f"Aportes realizados: {mensajes_al_cant}")
-                            
-                            with c_f3:
-                                with st.popover(f"Calificar a {al_f['nombre'].split()[0]}", key=f"pop_cal_foro_{f_eval['id']}_{al_f['id']}"):
-                                    with st.form(f"form_nota_foro_{f_eval['id']}_{al_f['id']}"):
-                                        n_foro_val = st.number_input("Nota Foro (0-10):", min_value=0.0, max_value=10.0, value=float(nota_f_act[0]) if nota_f_act and nota_f_act[0] is not None else 8.0)
-                                        dev_foro_val = st.text_area("Devolución:", value=nota_f_act[1] if nota_f_act and nota_f_act[1] else "Excelente participación en el foro.")
-                                        if st.form_submit_button("Guardar Nota"):
-                                            c.execute("""
-                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion)
-                                                VALUES (?, ?, ?, 'Participación en Foro', ?, ?)
-                                                ON CONFLICT(actividad_id, estudiante_id)
-                                                DO UPDATE SET nota = excluded.nota, devolucion = excluded.devolucion, fecha_entrega = excluded.fecha_entrega
-                                            """, (f_eval['id'], al_f['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), n_foro_val, dev_foro_val))
-                                            conn.commit()
-                                            st.success("Nota de foro guardada.")
-                                            st.rerun()
+                # Formulario para Cargar / Modificar Cuatrimestres e Informes
+                with st.expander("📝 Cargar o Modificar Cuatrimestres, Informes de Avance y Calificación Final"):
+                    map_al_cal = {f"{r['nombre']} ({r['email']})": r['id'] for _, r in alumnos_curso.iterrows()}
+                    sel_al_cal = st.selectbox("Seleccionar Alumno:", list(map_al_cal.keys()), key="sel_al_per_cal")
+                    al_cal_id = map_al_cal[sel_al_cal]
 
+                    datos_act = c.execute("""
+                        SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic
+                        FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?
+                    """, (cat_id, al_cal_id)).fetchone()
+
+                    with st.form(f"form_cargar_periodos_{al_cal_id}"):
+                        c_col1, c_col2 = st.columns(2)
+                        with c_col1:
+                            st.markdown("##### 📘 Primer Cuatrimestre")
+                            n_inf1 = st.text_input("1° Informe de Avance:", value=datos_act[0] if datos_act and datos_act[0] else "Aprobó satisfactoriamente")
+                            n_c1 = st.number_input("Nota 1° Cuatrimestre (1-10):", min_value=0.0, max_value=10.0, value=float(datos_act[1]) if datos_act and datos_act[1] is not None else 7.0)
+                        
+                        with c_col2:
+                            st.markdown("##### 📙 Segundo Cuatrimestre y Cierre")
+                            n_inf2 = st.text_input("2° Informe de Avance:", value=datos_act[2] if datos_act and datos_act[2] else "En proceso de entrega")
+                            n_c2 = st.number_input("Nota 2° Cuatrimestre (1-10):", min_value=0.0, max_value=10.0, value=float(datos_act[3]) if datos_act and datos_act[3] is not None else 7.0)
+                            n_fin = st.number_input("Calificación Final (Diciembre):", min_value=0.0, max_value=10.0, value=float(datos_act[4]) if datos_act and datos_act[4] is not None else 7.0)
+
+                        if st.form_submit_button("💾 Guardar Calificaciones de Períodos"):
+                            c.execute("""
+                                INSERT INTO calificaciones_periodos (catedra_id, estudiante_id, informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                ON CONFLICT(catedra_id, estudiante_id)
+                                DO UPDATE SET informe_avance_1=excluded.informe_avance_1, cuatrimestre_1=excluded.cuatrimestre_1,
+                                              informe_avance_2=excluded.informe_avance_2, cuatrimestre_2=excluded.cuatrimestre_2,
+                                              calificacion_final_dic=excluded.calificacion_final_dic
+                            """, (cat_id, al_cal_id, n_inf1.strip(), n_c1, n_inf2.strip(), n_c2, n_fin))
+                            conn.commit()
+                            st.success(f"Calificaciones de períodos guardadas para el alumno.")
+                            st.rerun()
+
+                # --- GRÁFICO DE TORTA DE RENDIMIENTO ACADÉMICO ---
+                st.divider()
+                st.markdown("### 📊 **Estadísticas de Rendimiento Académico**")
+                
+                col_g1, col_g2 = st.columns([1, 1])
+                with col_g1:
+                    if finales_para_grafico:
+                        aprobados = sum(1 for x in finales_para_grafico if x >= 7.0)
+                        en_proceso = sum(1 for x in finales_para_grafico if 4.0 <= x < 7.0)
+                        desaprobados = sum(1 for x in finales_para_grafico if x < 4.0)
+
+                        labels_g = []
+                        sizes_g = []
+                        colors_g = []
+
+                        if aprobados > 0:
+                            labels_g.append(f'Aprobados (≥7): {aprobados}')
+                            sizes_g.append(aprobados)
+                            colors_g.append('#22c55e')
+                        if en_proceso > 0:
+                            labels_g.append(f'En Proceso (4-6): {en_proceso}')
+                            sizes_g.append(en_proceso)
+                            colors_g.append('#f59e0b')
+                        if desaprobados > 0:
+                            labels_g.append(f'Desaprobados (<4): {desaprobados}')
+                            sizes_g.append(desaprobados)
+                            colors_g.append('#ef4444')
+
+                        fig_cal, ax_cal = plt.subplots(figsize=(4.5, 4.5))
+                        ax_cal.pie(sizes_g, labels=labels_g, autopct='%1.1f%%', colors=colors_g, startangle=140, textprops={'fontsize': 11})
+                        ax_cal.axis('equal')
+                        st.pyplot(fig_cal)
+                    else:
+                        st.info("Aún no se han asentado notas cuantitativas para generar el gráfico de rendimiento.")
+
+                with col_g2:
+                    st.markdown("##### 📌 Resumen de Estado de la Cursada:")
+                    tot_al = len(alumnos_curso)
+                    st.write(f"• **Total de Estudiantes Matriculados:** {tot_al}")
+                    if finales_para_grafico:
+                        prom_gral = sum(finales_para_grafico) / len(finales_para_grafico)
+                        st.write(f"• **Promedio General del Curso:** {prom_gral:.2f}")
+                    st.caption("El gráfico representa la distribución académica porcentual de los estudiantes con calificaciones asentadas.")
+
+            st.divider()
+            st.markdown("### **Revisión de Entregas, Trabajos Prácticos y Foros Evaluativos**")
+            
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
                        e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega
                 FROM entregas e
                 JOIN actividades a ON e.actividad_id = a.id
                 JOIN usuarios u ON e.estudiante_id = u.id
-                WHERE a.catedra_id = ? AND a.tipo IN ('Tarea', 'Cuestionario')
+                WHERE a.catedra_id = ?
             """, conn, params=(cat_id,))
 
             if not entregas_db.empty:
@@ -1103,7 +1153,7 @@ if u["rol"] == "profesor":
                                 st.success("Calificación guardada exitosamente.")
                                 st.rerun()
 
-        # --- 4. PESTAÑA ASISTENCIA ---
+        # --- 4. PESTAÑA ASISTENCIA (CON GRÁFICO DE TORTA DE PRESENTES/AUSENTES) ---
         with tab_asistencia:
             st.markdown("### **Control y Registro de Asistencia**")
             
@@ -1159,14 +1209,20 @@ if u["rol"] == "profesor":
                         st.rerun()
 
                 st.divider()
-                st.markdown("### 📊 **Estadísticas Generales y Porcentaje de Asistencia**")
+                st.markdown("### 📊 **Estadísticas Generales y Gráfico de Torta de Asistencia**")
                 
                 resumen_asist = []
+                total_presentes_global = 0
+                total_ausentes_global = 0
+
                 for _, al in alumnos_asist.iterrows():
                     total_clases = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()[0]
                     total_presentes = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ? AND estado = 'Presente'", (cat_id, al['id'])).fetchone()[0]
                     total_ausentes = total_clases - total_presentes
                     pct = round((total_presentes / total_clases) * 100, 1) if total_clases > 0 else 0.0
+
+                    total_presentes_global += total_presentes
+                    total_ausentes_global += total_ausentes
 
                     resumen_asist.append({
                         "Estudiante": al['nombre'],
@@ -1177,8 +1233,27 @@ if u["rol"] == "profesor":
                         "% Asistencia": f"{pct}%"
                     })
 
-                df_asist_resumen = pd.DataFrame(resumen_asist)
-                st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
+                col_asist_t, col_asist_g = st.columns([3, 2])
+                with col_asist_t:
+                    df_asist_resumen = pd.DataFrame(resumen_asist)
+                    st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
+
+                with col_asist_g:
+                    total_registros = total_presentes_global + total_ausentes_global
+                    if total_registros > 0:
+                        fig_asist, ax_asist = plt.subplots(figsize=(4, 4))
+                        ax_asist.pie(
+                            [total_presentes_global, total_ausentes_global],
+                            labels=[f'Presentes ({total_presentes_global})', f'Ausentes ({total_ausentes_global})'],
+                            autopct='%1.1f%%',
+                            colors=['#22c55e', '#ef4444'],
+                            startangle=90,
+                            textprops={'fontsize': 11}
+                        )
+                        ax_asist.axis('equal')
+                        st.pyplot(fig_asist)
+                    else:
+                        st.info("Aún no hay registros de asistencia para graficar.")
 
         # --- 5. PESTAÑA MENSAJES PRIVADOS ---
         with tab_mensajes:
@@ -1442,7 +1517,26 @@ else:
                                         st.rerun()
 
     with tab_al_notas:
-        st.markdown("### **Mis Calificaciones**")
+        st.markdown("### 📊 **Mis Calificaciones y Resumen de Períodos**")
+        
+        per_al = c.execute("""
+            SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic
+            FROM calificaciones_periodos
+            WHERE catedra_id = ? AND estudiante_id = ?
+        """, (materia_id, u['id'])).fetchone()
+
+        c_per1, c_per2, c_per3 = st.columns(3)
+        with c_per1:
+            st.metric("1° Cuatrimestre", f"{per_al[1]:.2f}" if per_al and per_al[1] is not None else "-")
+            st.caption(f"**1° Informe:** {per_al[0] if per_al and per_al[0] else '-'}")
+        with c_per2:
+            st.metric("2° Cuatrimestre", f"{per_al[3]:.2f}" if per_al and per_al[3] is not None else "-")
+            st.caption(f"**2° Informe:** {per_al[2] if per_al and per_al[2] else '-'}")
+        with c_per3:
+            st.metric("Calificación Final (Dic)", f"{per_al[4]:.2f}" if per_al and per_al[4] is not None else "-")
+
+        st.divider()
+        st.markdown("#### **Detalle de Trabajos y Exámenes Realizados:**")
         df_notas_al = pd.read_sql("""
             SELECT a.titulo as Actividad, a.tipo as Tipo, e.nota as Calificación, e.devolucion as Devolución, e.fecha_entrega as 'Fecha de Entrega'
             FROM actividades a
