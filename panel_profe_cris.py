@@ -345,7 +345,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
+# --- ASEGURAR USUARIO ADMINISTRADOR GENERAL ('cristian') ---
 admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
 if not admin_check:
     c.execute("""
@@ -879,8 +879,8 @@ elif u["rol"] == "profesor":
                 st.session_state.materia_seleccionada_id = None
                 st.rerun()
 
-        tab_curso, tab_participantes, tab_calificaciones, tab_asistencia, tab_mensajes = st.tabs([
-            "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
+        tab_curso, tab_correccion, tab_participantes, tab_calificaciones, tab_asistencia, tab_mensajes = st.tabs([
+            "📘 Curso", "📥 Corrección de Trabajos", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
         ])
 
         with tab_curso:
@@ -940,7 +940,6 @@ elif u["rol"] == "profesor":
                                 if tipo_p == "Opción Múltiple":
                                     enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
                                     cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}_{cat_id}")
-                                    
                                     opciones_config = []
                                     for op_idx in range(int(cant_opciones)):
                                         letra = chr(65 + op_idx)
@@ -1037,7 +1036,96 @@ elif u["rol"] == "profesor":
                             st.success("Eliminado.")
                             st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES ---
+        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (NUEVA SOLAPA DEDICADA) ---
+        with tab_correccion:
+            st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
+            st.caption("Revisá las entregas de los estudiantes, visualizá los porcentajes de autoría y volcá las calificaciones directamente a la planilla central.")
+            
+            entregas_db = pd.read_sql("""
+                SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as actividad_titulo, a.tipo as tipo_actividad, a.preguntas_json,
+                       e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega, e.reescritura_autorizada
+                FROM entregas e
+                JOIN actividades a ON e.actividad_id = a.id
+                JOIN usuarios u ON e.estudiante_id = u.id
+                WHERE a.catedra_id = ?
+            """, conn, params=(cat_id,))
+
+            if entregas_db.empty:
+                st.info("Aún no hay trabajos ni entregas registradas por los alumnos en este curso.")
+            else:
+                for _, ent in entregas_db.iterrows():
+                    t_min = f" | ⏱️ Tiempo: {round(ent['tiempo_empleado_seg']/60, 1)} min" if ent['tiempo_empleado_seg'] else ""
+                    aut_badge = " [🔓 Reescritura Autorizada]" if ent['reescritura_autorizada'] == 1 else ""
+                    nota_txt = f"Nota: {ent['nota']}" if ent['nota'] is not None else "Sin calificar"
+                    
+                    with st.expander(f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}){aut_badge} | {nota_txt}{t_min}"):
+                        st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
+                        
+                        if ent['preguntas_json'] and ent['respuesta_data']:
+                            st.markdown("#### **Desglose de Respuestas del Examen:**")
+                            try:
+                                preguntas = json.loads(ent['preguntas_json'])
+                                rtas_al = json.loads(ent['respuesta_data'])
+                                
+                                for idx, preg in enumerate(preguntas):
+                                    num_p = idx + 1
+                                    st.markdown(f"**Pregunta N° {num_p}:** {preg.get('enunciado','')}")
+                                    st.write(f"Respuesta del alumno: `{rtas_al.get(str(idx), 'Sin responder')}`")
+                            except Exception:
+                                st.write(f"Datos: {ent['respuesta_data']}")
+                        else:
+                            texto_alumno = ent['respuesta_data'] if ent['respuesta_data'] else ""
+                            if texto_alumno:
+                                st.markdown(f"<div class='task-response-box'><b>📝 Texto enviado:</b><br>{texto_alumno}</div>", unsafe_allow_html=True)
+
+                            texto_archivo_extraido = ""
+                            if ent['archivo_ruta'] and isinstance(ent['archivo_ruta'], str) and os.path.exists(ent['archivo_ruta']):
+                                nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
+                                texto_archivo_extraido = extraer_texto_archivo_entrega(ent['archivo_ruta'])
+                                with open(ent['archivo_ruta'], "rb") as f_adj:
+                                    st.download_button(
+                                        label=f"📥 Descargar Archivo Adjunto ({nombre_archivo_real})",
+                                        data=f_adj.read(),
+                                        file_name=nombre_archivo_real,
+                                        key=f"dl_corr_{ent['entrega_id']}"
+                                    )
+
+                            texto_a_auditar = texto_alumno if texto_alumno else texto_archivo_extraido
+                            if not texto_a_auditar and ent['archivo_ruta']:
+                                texto_a_auditar = os.path.basename(str(ent['archivo_ruta']))
+
+                            api_key_auditoria = get_config("gemini_api_key", "")
+                            reporte = analizar_antifraude_ia(texto_a_auditar, api_key_auditoria)
+
+                            st.markdown(f"""
+                            <div class='ai-detector-box' style='border-left: 5px solid {reporte['color']};'>
+                                <h5 style='margin:0 0 6px 0; color:#1e293b;'>📊 Auditoría de Autenticidad y Similitud Académica</h5>
+                                • <b>Probabilidad de Contenido asistido:</b> <span style='color:{reporte['color']}; font-weight:bold; font-size:15px;'>{reporte['pct_ia']}%</span><br>
+                                • <b>Índice de Similitud con Fuentes Web:</b> <b>{reporte['pct_web']}%</b><br>
+                                • <b>Dictamen:</b> {reporte['dictamen']}
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                        col_aut1, col_aut2 = st.columns([2, 2])
+                        with col_aut1:
+                            estado_aut = ent['reescritura_autorizada'] == 1
+                            if st.button("🔓 Autorizar nuevo envío / reescritura" if not estado_aut else "🔒 Revocar autorización", key=f"btn_aut_corr_{ent['entrega_id']}"):
+                                nuevo_estado = 0 if estado_aut else 1
+                                c.execute("UPDATE entregas SET reescritura_autorizada = ? WHERE id = ?", (nuevo_estado, ent['entrega_id']))
+                                conn.commit()
+                                st.success("Estado actualizado.")
+                                st.rerun()
+
+                        with st.form(f"form_corr_tab_{ent['entrega_id']}"):
+                            n_nueva = st.number_input("Calificación Final (0 a 10)", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
+                            dev_nueva = st.text_area("Devolución Pedagógica para el Alumno", value=ent['devolucion'] if ent['devolucion'] else "")
+                            if st.form_submit_button("💾 Guardar y Volcar a Calificaciones"):
+                                c.execute("UPDATE entregas SET nota = ?, devolucion = ? WHERE id = ?", (n_nueva, dev_nueva, ent['entrega_id']))
+                                conn.commit()
+                                st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
+                                st.rerun()
+
+        # --- 3. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             with st.form("form_alta_alumno_mail", clear_on_submit=True):
@@ -1070,7 +1158,7 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES ---
+        # --- 4. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
             st.markdown("### 📋 **Calificaciones y Períodos**")
             alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
@@ -1101,7 +1189,7 @@ elif u["rol"] == "profesor":
                             st.success("Guardado.")
                             st.rerun()
 
-        # --- 4. PESTAÑA ASISTENCIA ---
+        # --- 5. PESTAÑA ASISTENCIA ---
         with tab_asistencia:
             st.markdown("### **Asistencia**")
             alumnos_asist = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
@@ -1117,7 +1205,7 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.success("Asistencia guardada.")
 
-        # --- 5. PESTAÑA MENSAJES ---
+        # --- 6. PESTAÑA MENSAJES ---
         with tab_mensajes:
             st.markdown("### ✉️ **Buzón de Mensajes Privados**")
             alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
@@ -1170,7 +1258,7 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN PONDERADA ESTILO MOODLE
+                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
                     if act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1209,11 +1297,10 @@ else:
                                         
                                         st.markdown(f"**Pregunta N° {num_p}**")
                                         
-                                        if t_p == "multiple_choice" or t_p == "verdadero_falso":
+                                        if t_p in ["multiple_choice", "verdadero_falso"]:
                                             st.markdown(f"*{p['enunciado']}*")
                                             opciones_disp = [elec['texto'] for elec in p.get('opciones_config', [])]
                                             rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
-                                        
                                         elif t_p == "completar_espacios":
                                             st.markdown(f"*{p['enunciado']}*")
                                             correctas = p['palabras_correctas']
@@ -1231,14 +1318,11 @@ else:
 
                                         for idx, p in enumerate(pregs):
                                             t_p = p.get("tipo", "multiple_choice")
-                                            
                                             if t_p in ["multiple_choice", "verdadero_falso"]:
                                                 resp_elegida = rtas_seleccionadas.get(idx)
                                                 for elec in p.get('opciones_config', []):
                                                     if elec['texto'] == resp_elegida:
-                                                        # Sumar puntos según el porcentaje asignado por el docente (ej: 100% otorga 100 puntos, 50% otorga 50, etc.)
                                                         puntos_totales += float(elec.get('calificacion', 0.0))
-                                            
                                             elif t_p == "completar_espacios":
                                                 correctas = p['palabras_correctas']
                                                 gaps_al = rtas_seleccionadas.get(idx, {})
@@ -1246,7 +1330,6 @@ else:
                                                 if correctas:
                                                     puntos_totales += 100.0 * (aciertos_gaps / len(correctas))
 
-                                        # Calcular nota final en escala de 1 a 10
                                         nota_calc = round((puntos_totales / max_posible) * 10, 2) if max_posible > 0 else 0.0
                                         nota_calc = min(10.0, max(0.0, nota_calc))
                                         dev_auto = f"Examen finalizado. Calificación obtenida: {nota_calc}/10."
