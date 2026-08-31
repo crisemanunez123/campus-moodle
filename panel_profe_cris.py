@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     username TEXT UNIQUE,
     password TEXT,
     nombre TEXT,
-    email TEXT UNIQUE,
+    email TEXT,
     rol TEXT,
     foto_perfil TEXT,
     dni TEXT DEFAULT '',
@@ -1296,7 +1296,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE
+# 🎓 VISTA ESTUDIANTE (TAREAS CON DOBLE OPCIÓN: ESCRITURA Y ARCHIVO PDF)
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1328,8 +1328,66 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
-                    if act['tipo'] == "Cuestionario":
+                    # SI ES TAREA: PERMITE SUBIR PDF O CONTESTAR EN CAMPO DE ESCRITURA
+                    if act['tipo'] == "Tarea":
+                        ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
+                        ya_rendido = not ent_al.empty
+                        reescritura_permitida = False
+                        if ya_rendido:
+                            reescritura_permitida = ent_al.iloc[0]['reescritura_autorizada'] == 1
+
+                        if ya_rendido and not reescritura_permitida:
+                            data_e = ent_al.iloc[0]
+                            st.success(f"Tarea entregada el {data_e['fecha_entrega']}.")
+                            if data_e['archivo_ruta'] and os.path.exists(str(data_e['archivo_ruta'])):
+                                nom_ent = os.path.basename(str(data_e['archivo_ruta']))
+                                with open(data_e['archivo_ruta'], "rb") as fe_d:
+                                    st.download_button(label=f"📥 Descargar mi entrega ({nom_ent})", data=fe_d.read(), file_name=nom_ent, key=f"dl_ent_{data_e['id']}")
+                            elif data_e['respuesta_data']:
+                                st.markdown(f"**Tu respuesta escrita:** {data_e['respuesta_data']}")
+
+                            if data_e['nota'] is not None:
+                                st.metric("Calificación:", f"{data_e['nota']}/10")
+                                st.info(f"**Devolución del Docente:**\n{data_e['devolucion']}")
+                            
+                            st.divider()
+                            if st.button("🔄 Solicitar Autorización de Reenvío", key=f"req_reenv_tarea_{act['id']}"):
+                                msg_auto = f"Hola profesor, solicito autorización para volver a enviar mi tarea en la actividad: '{act['titulo']}'."
+                                c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (?, ?, ?, ?, ?, 0)", (u["id"], materia_row["profesor_id"], materia_id, msg_auto, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                conn.commit()
+                                st.success("¡Solicitud enviada al profesor!")
+                        else:
+                            if reescritura_permitida:
+                                st.warning("🔓 El profesor te autorizó a realizar una nueva entrega.")
+
+                            with st.form(f"form_tarea_dual_{act['id']}"):
+                                st.markdown("##### ✍️ Responder en campo de texto:")
+                                rta_texto = st.text_area("Escribí tu respuesta o desarrollo aquí:")
+                                
+                                st.markdown("##### 📂 O adjuntar archivo PDF / Word:")
+                                arch_pdf = st.file_uploader("Seleccionar archivo:", type=["pdf", "docx", "txt", "zip"], key=f"up_pdf_{act['id']}")
+
+                                if st.form_submit_button("🚀 Enviar Tarea"):
+                                    if not rta_texto.strip() and arch_pdf is None:
+                                        st.error("Debes escribir una respuesta en texto o adjuntar un archivo.")
+                                    else:
+                                        r_path = None
+                                        if arch_pdf is not None:
+                                            r_path = os.path.join(CARPETA_ENTREGAS, f"{u['id']}_{act['id']}_{arch_pdf.name}")
+                                            with open(r_path, "wb") as f_up:
+                                                f_up.write(arch_pdf.getbuffer())
+
+                                        c.execute("""
+                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta, reescritura_autorizada)
+                                            VALUES (?, ?, ?, ?, ?, 0)
+                                            ON CONFLICT(actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data, archivo_ruta=excluded.archivo_ruta, reescritura_autorizada=0
+                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_texto.strip(), r_path))
+                                        conn.commit()
+                                        st.success("¡Tarea enviada correctamente!")
+                                        st.rerun()
+
+                    # SI ES EXAMEN / CUESTIONARIO CON AVISO Y CRONÓMETRO ROJO
+                    elif act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
 
