@@ -5,8 +5,8 @@ import os
 import json
 import time
 import re
+import math
 import smtplib
-import matplotlib.pyplot as plt
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date
@@ -144,6 +144,16 @@ CREATE TABLE IF NOT EXISTS catedras (
 )
 """)
 
+try:
+    cols_cat = [col[1] for col in c.execute("PRAGMA table_info(catedras)").fetchall()]
+    if "curso_anio" not in cols_cat:
+        c.execute("ALTER TABLE catedras ADD COLUMN curso_anio TEXT")
+    if "escuela" not in cols_cat:
+        c.execute("ALTER TABLE catedras ADD COLUMN escuela TEXT")
+    conn.commit()
+except Exception:
+    pass
+
 c.execute("""
 CREATE TABLE IF NOT EXISTS secciones (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,6 +181,14 @@ CREATE TABLE IF NOT EXISTS actividades (
     FOREIGN KEY(seccion_id) REFERENCES secciones(id)
 )
 """)
+
+try:
+    cols_act = [col[1] for col in c.execute("PRAGMA table_info(actividades)").fetchall()]
+    if "es_obligatorio" not in cols_act:
+        c.execute("ALTER TABLE actividades ADD COLUMN es_obligatorio INTEGER DEFAULT 0")
+        conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS matriculas (
@@ -262,6 +280,63 @@ CREATE TABLE IF NOT EXISTS configuracion (
 )
 """)
 conn.commit()
+
+# --- FUNCIONES DE DIBUJO DE TORTA (SVG) ---
+def render_pie_chart_svg(data_dict):
+    total = sum(data_dict.values())
+    if total == 0:
+        return "<p style='color:gray;'>Sin datos suficientes</p>"
+    
+    slices = []
+    cumulative_angle = 0
+    legend_html = "<div style='margin-top:12px; font-size:13px;'>"
+    
+    colors = {
+        "Presentes": "#22c55e",
+        "Ausentes": "#ef4444",
+        "Aprobados (≥7)": "#22c55e",
+        "En Proceso (4-6)": "#f59e0b",
+        "Desaprobados (<4)": "#ef4444"
+    }
+    
+    for label, val in data_dict.items():
+        if val <= 0:
+            continue
+        pct = (val / total) * 100
+        angle = (val / total) * 360
+        color = colors.get(label, "#3b82f6")
+        
+        # Coordenadas SVG
+        start_angle = cumulative_angle
+        end_angle = cumulative_angle + angle
+        cumulative_angle = end_angle
+        
+        x1 = 100 + 80 * math.cos(math.radians(start_angle - 90))
+        y1 = 100 + 80 * math.sin(math.radians(start_angle - 90))
+        x2 = 100 + 80 * math.cos(math.radians(end_angle - 90))
+        y2 = 100 + 80 * math.sin(math.radians(end_angle - 90))
+        
+        large_arc = 1 if angle > 180 else 0
+        
+        if angle >= 359.99:
+            path = f"<circle cx='100' cy='100' r='80' fill='{color}' />"
+        else:
+            path = f"<path d='M 100 100 L {x1:.2f} {y1:.2f} A 80 80 0 {large_arc} 1 {x2:.2f} {y2:.2f} Z' fill='{color}' stroke='#ffffff' stroke-width='2' />"
+        
+        slices.append(path)
+        legend_html += f"<div style='display:flex; align-items:center; margin-bottom:4px;'><span style='display:inline-block; width:12px; height:12px; background-color:{color}; border-radius:3px; margin-right:8px;'></span><b>{label}:</b>&nbsp;{val} ({pct:.1f}%)</div>"
+        
+    legend_html += "</div>"
+    
+    svg_html = f"""
+    <div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'>
+        <svg width='180' height='180' viewBox='0 0 200 200'>
+            {''.join(slices)}
+        </svg>
+        {legend_html}
+    </div>
+    """
+    return svg_html
 
 # --- FUNCIONES DE UTILIDAD ---
 def get_config(clave, default=""):
@@ -508,7 +583,7 @@ if u["rol"] == "profesor":
                         st.session_state.materia_seleccionada_id = row['id']
                         st.rerun()
 
-    # DENTRO DE UNA MATERIA (BARRA LATERAL OCULTA)
+    # DENTRO DE UNA MATERIA
     else:
         cat_id = st.session_state.materia_seleccionada_id
         res_cat = c.execute("SELECT nombre, curso_anio, escuela FROM catedras WHERE id = ?", (cat_id,)).fetchone()
@@ -916,7 +991,7 @@ if u["rol"] == "profesor":
                             st.success(f"{al_row['nombre']} desmatriculado/a.")
                             st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES (CON CUATRIMESTRES, INFORMES Y GRÁFICO DE TORTA) ---
+        # --- 3. PESTAÑA CALIFICACIONES (CON CUATRIMESTRES, INFORMES Y GRÁFICO DE TORTA SVG) ---
         with tab_calificaciones:
             st.markdown("### 📈 **Libro Central de Calificaciones y Períodos**")
             
@@ -935,7 +1010,6 @@ if u["rol"] == "profesor":
                 for _, al in alumnos_curso.iterrows():
                     iniciales = "".join([part[0] for part in al['nombre'].split()[:2]]).upper()
                     
-                    # Leer datos oficiales de períodos
                     per = c.execute("""
                         SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic
                         FROM calificaciones_periodos
@@ -969,7 +1043,6 @@ if u["rol"] == "profesor":
                 df_render = pd.DataFrame(tabla_calif)
                 st.dataframe(df_render, use_container_width=True, hide_index=True)
 
-                # Formulario para Cargar / Modificar Cuatrimestres e Informes
                 with st.expander("📝 Cargar o Modificar Cuatrimestres, Informes de Avance y Calificación Final"):
                     map_al_cal = {f"{r['nombre']} ({r['email']})": r['id'] for _, r in alumnos_curso.iterrows()}
                     sel_al_cal = st.selectbox("Seleccionar Alumno:", list(map_al_cal.keys()), key="sel_al_per_cal")
@@ -1006,7 +1079,7 @@ if u["rol"] == "profesor":
                             st.success(f"Calificaciones de períodos guardadas para el alumno.")
                             st.rerun()
 
-                # --- GRÁFICO DE TORTA DE RENDIMIENTO ACADÉMICO ---
+                # --- GRÁFICO DE TORTA SVG RENDIMIENTO ACADÉMICO ---
                 st.divider()
                 st.markdown("### 📊 **Estadísticas de Rendimiento Académico**")
                 
@@ -1017,27 +1090,12 @@ if u["rol"] == "profesor":
                         en_proceso = sum(1 for x in finales_para_grafico if 4.0 <= x < 7.0)
                         desaprobados = sum(1 for x in finales_para_grafico if x < 4.0)
 
-                        labels_g = []
-                        sizes_g = []
-                        colors_g = []
-
-                        if aprobados > 0:
-                            labels_g.append(f'Aprobados (≥7): {aprobados}')
-                            sizes_g.append(aprobados)
-                            colors_g.append('#22c55e')
-                        if en_proceso > 0:
-                            labels_g.append(f'En Proceso (4-6): {en_proceso}')
-                            sizes_g.append(en_proceso)
-                            colors_g.append('#f59e0b')
-                        if desaprobados > 0:
-                            labels_g.append(f'Desaprobados (<4): {desaprobados}')
-                            sizes_g.append(desaprobados)
-                            colors_g.append('#ef4444')
-
-                        fig_cal, ax_cal = plt.subplots(figsize=(4.5, 4.5))
-                        ax_cal.pie(sizes_g, labels=labels_g, autopct='%1.1f%%', colors=colors_g, startangle=140, textprops={'fontsize': 11})
-                        ax_cal.axis('equal')
-                        st.pyplot(fig_cal)
+                        dict_rendimiento = {
+                            "Aprobados (≥7)": aprobados,
+                            "En Proceso (4-6)": en_proceso,
+                            "Desaprobados (<4)": desaprobados
+                        }
+                        st.markdown(render_pie_chart_svg(dict_rendimiento), unsafe_allow_html=True)
                     else:
                         st.info("Aún no se han asentado notas cuantitativas para generar el gráfico de rendimiento.")
 
@@ -1153,7 +1211,7 @@ if u["rol"] == "profesor":
                                 st.success("Calificación guardada exitosamente.")
                                 st.rerun()
 
-        # --- 4. PESTAÑA ASISTENCIA (CON GRÁFICO DE TORTA DE PRESENTES/AUSENTES) ---
+        # --- 4. PESTAÑA ASISTENCIA (CON GRÁFICO DE TORTA SVG) ---
         with tab_asistencia:
             st.markdown("### **Control y Registro de Asistencia**")
             
@@ -1241,17 +1299,11 @@ if u["rol"] == "profesor":
                 with col_asist_g:
                     total_registros = total_presentes_global + total_ausentes_global
                     if total_registros > 0:
-                        fig_asist, ax_asist = plt.subplots(figsize=(4, 4))
-                        ax_asist.pie(
-                            [total_presentes_global, total_ausentes_global],
-                            labels=[f'Presentes ({total_presentes_global})', f'Ausentes ({total_ausentes_global})'],
-                            autopct='%1.1f%%',
-                            colors=['#22c55e', '#ef4444'],
-                            startangle=90,
-                            textprops={'fontsize': 11}
-                        )
-                        ax_asist.axis('equal')
-                        st.pyplot(fig_asist)
+                        dict_asist = {
+                            "Presentes": total_presentes_global,
+                            "Ausentes": total_ausentes_global
+                        }
+                        st.markdown(render_pie_chart_svg(dict_asist), unsafe_allow_html=True)
                     else:
                         st.info("Aún no hay registros de asistencia para graficar.")
 
