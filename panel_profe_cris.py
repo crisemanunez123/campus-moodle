@@ -311,6 +311,14 @@ CREATE TABLE IF NOT EXISTS mensajes_privados (
 )
 """)
 
+try:
+    cols_msg = [col[1] for col in c.execute("PRAGMA table_info(mensajes_privados)").fetchall()]
+    if "leido" not in cols_msg:
+        c.execute("ALTER TABLE mensajes_privados ADD COLUMN leido INTEGER DEFAULT 0")
+        conn.commit()
+except Exception:
+    pass
+
 c.execute("""
 CREATE TABLE IF NOT EXISTS calificaciones_periodos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -344,7 +352,6 @@ if not admin_check:
     """)
     conn.commit()
 else:
-    # Forzar rol admin y contraseña 1234 si ya existía con otro rol
     c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
     conn.commit()
 
@@ -601,7 +608,7 @@ if st.session_state.user is None:
                     st.success("Acceso concedido.")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas (Admin inicial: `cristian`/`1234`)")
+                    st.error("Credenciales incorrectas (Admin: `cristian`/`1234`)")
     st.stop()
 
 # --- ENCABEZADO GLOBAL ---
@@ -663,7 +670,7 @@ with col_h3:
 st.divider()
 
 # ==============================================================================
-# 👑 VISTA ADMINISTRADOR GENERAL (CRISTIAN NUÑEZ) - CLIENTES PROFESORES Y SUSCRIPCIONES
+# 👑 VISTA ADMINISTRADOR GENERAL (CRISTIAN NUÑEZ)
 # ==============================================================================
 if u["rol"] == "admin":
     st.markdown("## **👑 Panel de Administración General — Gestión de Clientes (Profesores)**")
@@ -720,7 +727,7 @@ if u["rol"] == "admin":
                         val_pagado = bool(pagado_previo[0]) if pagado_previo else False
                         
                         with cols_meses[idx % 6]:
-                            nuevo_estado = st.checkbox(mes, value=val_pagado, key=f"pago_{cli['id']}_{mes}")
+                            nuevo_estado = st.checkbox(mes, value=val_pagado, key=f"pago_{cli['id']}_{mes}_{anio_actual}")
                             if nuevo_estado != val_pagado:
                                 c.execute("""
                                     INSERT INTO suscripciones_meses (profesor_id, anio, mes, pagado)
@@ -918,39 +925,39 @@ elif u["rol"] == "profesor":
                         for i in range(int(cant_pregs)):
                             num_preg = i + 1
                             st.markdown(f"#### **Pregunta N° {num_preg}**")
-                            tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}")
+                            tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}_{cat_id}")
                             
                             if tipo_p == "Opción Múltiple":
-                                enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}")
-                                cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}")
+                                enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
+                                cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}_{cat_id}")
                                 ops_cargadas = []
                                 for op_idx in range(int(cant_opciones)):
                                     letra = chr(65 + op_idx)
-                                    val_op = st.text_input(f"Opción {letra}:", key=f"op_{i}_{op_idx}")
+                                    val_op = st.text_input(f"Opción {letra}:", key=f"op_{i}_{op_idx}_{cat_id}")
                                     if val_op:
                                         ops_cargadas.append(val_op.strip())
                                 if ops_cargadas:
-                                    corr = st.selectbox(f"Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}")
+                                    corr = st.selectbox(f"Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
                                     if enun.strip():
                                         preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr})
                             
                             elif tipo_p == "Verdadero o Falso":
-                                enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}")
-                                corr_vf = st.radio(f"Correcta #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}")
+                                enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}_{cat_id}")
+                                corr_vf = st.radio(f"Correcta #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
                                 if enun_vf.strip():
                                     preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf})
 
                             elif tipo_p == "Completar Párrafo":
-                                texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}")
-                                distractores = st.text_input(f"Distractores (separados por coma):", key=f"distr_{i}")
+                                texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}_{cat_id}")
+                                distractores = st.text_input(f"Distractores (separados por coma):", key=f"distr_{i}_{cat_id}")
                                 if texto_parrafo.strip():
                                     palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
                                     if palabras_a_completar:
                                         preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()]})
 
-                    enlace_url = st.text_input("Enlace web / URL de Video (opcional)")
+                    enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
 
-                    if st.button("🚀 Publicar Recurso"):
+                    if st.button("🚀 Publicar Recurso", key=f"btn_pub_act_{cat_id}"):
                         if not tit_act.strip():
                             st.error("Completá el título.")
                         else:
@@ -978,7 +985,7 @@ elif u["rol"] == "profesor":
         # --- 2. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
-            with st.form("form_alta_alumno_mail", clear_on_submit=True):
+            with st.form(f"form_alta_alumno_mail_{cat_id}", clear_on_submit=True):
                 nom_a = st.text_input("Nombre y Apellido Completo")
                 mail_a = st.text_input("Email Personal del Alumno")
                 usr_a = st.text_input("Usuario Asignado")
@@ -1003,7 +1010,7 @@ elif u["rol"] == "profesor":
                 for _, al_row in df_matriculados.iterrows():
                     col_m1, col_m2 = st.columns([4, 1])
                     col_m1.markdown(f"👤 **{al_row['nombre']}** (`{al_row['email']}`)")
-                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}"):
+                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
                         c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
                         conn.commit()
                         st.rerun()
@@ -1021,14 +1028,14 @@ elif u["rol"] == "profesor":
 
                 with st.expander("📝 Cargar / Modificar Informes (TEA, TEP, TED)"):
                     map_al_cal = {r['nombre']: r['id'] for _, r in alumnos_curso.iterrows()}
-                    sel_al_cal = st.selectbox("Alumno:", list(map_al_cal.keys()))
+                    sel_al_cal = st.selectbox("Alumno:", list(map_al_cal.keys()), key=f"sel_al_cal_{cat_id}")
                     al_cal_id = map_al_cal[sel_al_cal]
-                    with st.form(f"form_per_{al_cal_id}"):
-                        n_inf1 = st.selectbox("1° Informe:", ["-", "TEA", "TEP", "TED"])
-                        n_c1 = st.number_input("Nota 1° Cuatrimestre:", 0.0, 10.0, 7.0)
-                        n_inf2 = st.selectbox("2° Informe:", ["-", "TEA", "TEP", "TED"])
-                        n_c2 = st.number_input("Nota 2° Cuatrimestre:", 0.0, 10.0, 7.0)
-                        n_fin = st.number_input("Nota Final Diciembre:", 0.0, 10.0, 7.0)
+                    with st.form(f"form_per_{al_cal_id}_{cat_id}"):
+                        n_inf1 = st.selectbox("1° Informe:", ["-", "TEA", "TEP", "TED"], key=f"inf1_{cat_id}")
+                        n_c1 = st.number_input("Nota 1° Cuatrimestre:", 0.0, 10.0, 7.0, key=f"c1_{cat_id}")
+                        n_inf2 = st.selectbox("2° Informe:", ["-", "TEA", "TEP", "TED"], key=f"inf2_{cat_id}")
+                        n_c2 = st.number_input("Nota 2° Cuatrimestre:", 0.0, 10.0, 7.0, key=f"c2_{cat_id}")
+                        n_fin = st.number_input("Nota Final Diciembre:", 0.0, 10.0, 7.0, key=f"fin_{cat_id}")
                         if st.form_submit_button("Guardar"):
                             c.execute("""
                                 INSERT INTO calificaciones_periodos (catedra_id, estudiante_id, informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic)
@@ -1044,11 +1051,11 @@ elif u["rol"] == "profesor":
             st.markdown("### **Asistencia**")
             alumnos_asist = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
             if not alumnos_asist.empty:
-                fecha_sel = st.date_input("Fecha:", value=date.today())
-                with st.form("form_asist"):
+                fecha_sel = st.date_input("Fecha:", value=date.today(), key=f"date_asist_{cat_id}")
+                with st.form(f"form_asist_{cat_id}"):
                     est_dict = {}
                     for _, al in alumnos_asist.iterrows():
-                        est_dict[al['id']] = st.radio(al['nombre'], ["Presente", "Ausente"], horizontal=True, key=f"as_{al['id']}")
+                        est_dict[al['id']] = st.radio(al['nombre'], ["Presente", "Ausente"], horizontal=True, key=f"as_{al['id']}_{cat_id}")
                     if st.form_submit_button("Guardar Asistencia"):
                         for aid, estado in est_dict.items():
                             c.execute("INSERT INTO asistencias (catedra_id, estudiante_id, fecha, estado) VALUES (?, ?, ?, ?) ON CONFLICT(catedra_id, estudiante_id, fecha) DO UPDATE SET estado = excluded.estado", (cat_id, aid, str(fecha_sel), estado))
@@ -1061,15 +1068,15 @@ elif u["rol"] == "profesor":
             alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
             if not alumnos_curso.empty:
                 map_al_msg = {r['nombre']: r['id'] for _, r in alumnos_curso.iterrows()}
-                sel_al_chat = st.selectbox("Alumno:", list(map_al_msg.keys()))
+                sel_al_chat = st.selectbox("Alumno:", list(map_al_msg.keys()), key=f"sel_chat_al_{cat_id}")
                 al_chat_id = map_al_msg[sel_al_chat]
 
                 mensajes_priv = pd.read_sql("SELECT m.mensaje, m.fecha, m.emisor_id FROM mensajes_privados m WHERE m.catedra_id = ? AND ((m.emisor_id = ? AND m.receptor_id = ?) OR (m.emisor_id = ? AND m.receptor_id = ?)) ORDER BY m.id ASC", conn, params=(cat_id, u["id"], al_chat_id, al_chat_id, u["id"]))
                 for _, msg_p in mensajes_priv.iterrows():
                     st.write(f"{'Yo' if msg_p['emisor_id'] == u['id'] else 'Alumno'}: {msg_p['mensaje']}")
 
-                with st.form("form_chat_profe", clear_on_submit=True):
-                    txt_m = st.text_area("Mensaje:")
+                with st.form(f"form_chat_profe_{cat_id}", clear_on_submit=True):
+                    txt_m = st.text_area("Mensaje:", key=f"txt_msg_profe_{cat_id}")
                     if st.form_submit_button("Enviar") and txt_m.strip():
                         c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (?, ?, ?, ?, ?, 0)", (u["id"], al_chat_id, cat_id, txt_m.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
                         conn.commit()
