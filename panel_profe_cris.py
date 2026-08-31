@@ -335,11 +335,17 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- USUARIOS INICIALES (ADMINISTRADOR GENERAL CRISTIAN NUÑEZ) ---
-if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono) VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')")
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('profesor', '1234', 'Prof. Cristian Nuñez', 'prof@educacion.edu', 'profesor')")
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('alumno1', '1234', 'Juan Pérez', 'juan@gmail.com', 'estudiante')")
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
+admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
+if not admin_check:
+    c.execute("""
+        INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
+        VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
+    """)
+    conn.commit()
+else:
+    # Forzar rol admin y contraseña 1234 si ya existía con otro rol
+    c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
     conn.commit()
 
 # --- FUNCIONES AUXILIARES ---
@@ -595,7 +601,7 @@ if st.session_state.user is None:
                     st.success("Acceso concedido.")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas (Admin: `cristian`/`1234`)")
+                    st.error("Credenciales incorrectas (Admin inicial: `cristian`/`1234`)")
     st.stop()
 
 # --- ENCABEZADO GLOBAL ---
