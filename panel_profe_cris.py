@@ -18,8 +18,10 @@ st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="
 
 CARPETA_ENTREGAS = "entregas_alumnos"
 CARPETA_PERFILES = "fotos_perfil"
+CARPETA_BIBLIO = "archivos_bibliografia"
 os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
 os.makedirs(CARPETA_PERFILES, exist_ok=True)
+os.makedirs(CARPETA_BIBLIO, exist_ok=True)
 
 # --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL Y ALTO CONTRASTE ---
 st.markdown("""
@@ -898,78 +900,94 @@ elif u["rol"] == "profesor":
                         "💬 Foro (Debate e Interacción)",
                         "⏱️ Cuestionario / Examen Dinámico por Tiempo",
                         "📝 Tarea (Entrega de Archivo/Texto)"
-                    ])
+                    ], key=f"tipo_mod_sel_{cat_id}")
+                    
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
-                    sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
+                    sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()), key=f"sec_elegida_sel_{cat_id}")
 
-                    tit_act = st.text_input("Título de la actividad / bibliografía / foro / examen", placeholder="Ej: Material de lectura / Examen Parcial")
-                    desc_act = st.text_area("Descripción / Consigna", placeholder="Detalles o instrucciones...")
-                    f_lim = st.date_input("Fecha Límite", min_value=date.today())
+                    # Formulario limpio con clear_on_submit=True para que se reinicie a cero al publicar
+                    with st.form(f"form_publicar_recurso_{cat_id}", clear_on_submit=True):
+                        tit_act = st.text_input("Título de la actividad / bibliografía / foro / examen", placeholder="Ej: Material de lectura / Examen Parcial")
+                        desc_act = st.text_area("Descripción / Consigna", placeholder="Detalles o instrucciones...")
+                        f_lim = st.date_input("Fecha Límite", min_value=date.today())
 
-                    es_obligatorio_val = 0
-                    if "Bibliografía" in tipo_modulo:
-                        caracter_biblio = st.radio("Carácter:", ["Bibliografía Obligatoria", "Bibliografía Optativa"], horizontal=True)
-                        es_obligatorio_val = 1 if caracter_biblio == "Bibliografía Obligatoria" else 0
-                    elif "Foro" in tipo_modulo:
-                        es_obligatorio_val = 1 if st.checkbox("📌 Foro obligatorio/evaluativo", value=False) else 0
+                        es_obligatorio_val = 0
+                        if "Bibliografía" in tipo_modulo:
+                            caracter_biblio = st.radio("Carácter de la Bibliografía:", ["Bibliografía Obligatoria", "Bibliografía Optativa"], horizontal=True)
+                            es_obligatorio_val = 1 if caracter_biblio == "Bibliografía Obligatoria" else 0
+                        elif "Foro" in tipo_modulo:
+                            es_obligatorio_val = 1 if st.checkbox("📌 Foro obligatorio/evaluativo", value=False) else 0
 
-                    dur_min = 0
-                    preguntas_generadas = []
+                        dur_min = 0
+                        preguntas_generadas = []
 
-                    if "Examen" in tipo_modulo:
-                        st.markdown("---")
-                        st.markdown("### 🛠️ **Configuración del Examen por Tiempo**")
-                        dur_min = st.number_input("⏱️ Tiempo límite (minutos):", min_value=1, max_value=240, value=15)
-                        cant_pregs = st.number_input("Cantidad de preguntas:", min_value=1, max_value=25, value=2)
-                        
-                        for i in range(int(cant_pregs)):
-                            num_preg = i + 1
-                            st.markdown(f"#### **Pregunta N° {num_preg}**")
-                            tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}_{cat_id}")
+                        if "Examen" in tipo_modulo:
+                            st.markdown("---")
+                            st.markdown("### 🛠️ **Configuración del Examen por Tiempo**")
+                            dur_min = st.number_input("⏱️ Tiempo límite (minutos):", min_value=1, max_value=240, value=15)
+                            cant_pregs = st.number_input("Cantidad de preguntas:", min_value=1, max_value=25, value=2)
                             
-                            if tipo_p == "Opción Múltiple":
-                                enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
-                                cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}_{cat_id}")
-                                ops_cargadas = []
-                                for op_idx in range(int(cant_opciones)):
-                                    letra = chr(65 + op_idx)
-                                    val_op = st.text_input(f"Opción {letra}:", key=f"op_{i}_{op_idx}_{cat_id}")
-                                    if val_op:
-                                        ops_cargadas.append(val_op.strip())
-                                if ops_cargadas:
-                                    corr = st.selectbox(f"Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
-                                    if enun.strip():
-                                        preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr})
-                            
-                            elif tipo_p == "Verdadero o Falso":
-                                enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}_{cat_id}")
-                                corr_vf = st.radio(f"Correcta #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
-                                if enun_vf.strip():
-                                    preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf})
+                            for i in range(int(cant_pregs)):
+                                num_preg = i + 1
+                                st.markdown(f"#### **Pregunta N° {num_preg}**")
+                                tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}_{cat_id}")
+                                
+                                if tipo_p == "Opción Múltiple":
+                                    enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
+                                    cant_opciones = st.number_input(f"Cantidad de opciones #{num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}_{cat_id}")
+                                    ops_cargadas = []
+                                    for op_idx in range(int(cant_opciones)):
+                                        letra = chr(65 + op_idx)
+                                        val_op = st.text_input(f"Opción {letra}:", key=f"op_{i}_{op_idx}_{cat_id}")
+                                        if val_op:
+                                            ops_cargadas.append(val_op.strip())
+                                    if ops_cargadas:
+                                        corr = st.selectbox(f"Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
+                                        if enun.strip():
+                                            preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr})
+                                
+                                elif tipo_p == "Verdadero o Falso":
+                                    enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}_{cat_id}")
+                                    corr_vf = st.radio(f"Correcta #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
+                                    if enun_vf.strip():
+                                        preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf})
 
-                            elif tipo_p == "Completar Párrafo":
-                                texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}_{cat_id}")
-                                distractores = st.text_input(f"Distractores (separados por coma):", key=f"distr_{i}_{cat_id}")
-                                if texto_parrafo.strip():
-                                    palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
-                                    if palabras_a_completar:
-                                        preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()]})
+                                elif tipo_p == "Completar Párrafo":
+                                    texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}_{cat_id}")
+                                    distractores = st.text_input(f"Distractores (separados por coma):", key=f"distr_{i}_{cat_id}")
+                                    if texto_parrafo.strip():
+                                        palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
+                                        if palabras_a_completar:
+                                            preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()]})
 
-                    enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
+                        enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
 
-                    if st.button("🚀 Publicar Recurso", key=f"btn_pub_act_{cat_id}"):
-                        if not tit_act.strip():
-                            st.error("Completá el título.")
-                        else:
-                            tipo_db = "Bibliografía" if "Bibliografía" in tipo_modulo else ("Foro" if "Foro" in tipo_modulo else ("Cuestionario" if "Examen" in tipo_modulo else "Tarea"))
-                            json_str = json.dumps(preguntas_generadas, ensure_ascii=False) if tipo_db == "Cuestionario" else None
-                            c.execute("""
-                                INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo, es_obligatorio)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, enlace_url, es_obligatorio_val))
-                            conn.commit()
-                            st.success("¡Publicado!")
-                            st.rerun()
+                        # SIEMPRE DISPONIBLE EN BIBLIOGRAFÍA
+                        archivo_subido_biblio = None
+                        if "Bibliografía" in tipo_modulo:
+                            st.markdown("---")
+                            archivo_subido_biblio = st.file_uploader("📂 **Cargar archivo de bibliografía (PDF, Word, etc.):**", type=["pdf", "docx", "txt", "xlsx", "pptx"], key=f"upl_biblio_{cat_id}")
+
+                        if st.form_submit_button("🚀 Publicar Recurso en el Curso"):
+                            if not tit_act.strip():
+                                st.error("Completá el título de la actividad.")
+                            else:
+                                tipo_db = "Bibliografía" if "Bibliografía" in tipo_modulo else ("Foro" if "Foro" in tipo_modulo else ("Cuestionario" if "Examen" in tipo_modulo else "Tarea"))
+                                json_str = json.dumps(preguntas_generadas, ensure_ascii=False) if tipo_db == "Cuestionario" else None
+                                
+                                ruta_final_biblio = enlace_url
+                                if archivo_subido_biblio is not None:
+                                    ruta_final_biblio = os.path.join(CARPETA_BIBLIO, f"{cat_id}_{int(time.time())}_{archivo_subido_biblio.name}")
+                                    with open(ruta_final_biblio, "wb") as fb:
+                                        fb.write(archivo_subido_biblio.getbuffer())
+
+                                c.execute("""
+                                    INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo, es_obligatorio)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, ruta_final_biblio, es_obligatorio_val))
+                                conn.commit()
+                                st.success("¡Publicado exitosamente!")
+                                st.rerun()
 
             df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             for _, sec in df_secciones.iterrows():
@@ -980,12 +998,17 @@ elif u["rol"] == "profesor":
                     with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
                         st.write(a['descripcion'])
                         if a['enlace_archivo']:
-                            renderizar_recurso_multimedia(a['enlace_archivo'])
+                            if os.path.exists(str(a['enlace_archivo'])):
+                                nom_b = os.path.basename(str(a['enlace_archivo']))
+                                with open(a['enlace_archivo'], "rb") as fb_d:
+                                    st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_b})", data=fb_d.read(), file_name=nom_b, key=f"dl_bib_{a['id']}")
+                            else:
+                                renderizar_recurso_multimedia(a['enlace_archivo'])
 
         # --- 2. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
-            with st.form(f"form_alta_alumno_mail_{cat_id}", clear_on_submit=True):
+            with st.form("form_alta_alumno_mail", clear_on_submit=True):
                 nom_a = st.text_input("Nombre y Apellido Completo")
                 mail_a = st.text_input("Email Personal del Alumno")
                 usr_a = st.text_input("Usuario Asignado")
@@ -1010,7 +1033,7 @@ elif u["rol"] == "profesor":
                 for _, al_row in df_matriculados.iterrows():
                     col_m1, col_m2 = st.columns([4, 1])
                     col_m1.markdown(f"👤 **{al_row['nombre']}** (`{al_row['email']}`)")
-                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
+                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}"):
                         c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
                         conn.commit()
                         st.rerun()
@@ -1108,7 +1131,12 @@ else:
                 with st.expander(f"{act['tipo']}: {act['titulo']}"):
                     st.write(act['descripcion'])
                     if act['enlace_archivo']:
-                        renderizar_recurso_multimedia(act['enlace_archivo'])
+                        if os.path.exists(str(act['enlace_archivo'])):
+                            nom_bf = os.path.basename(str(act['enlace_archivo']))
+                            with open(act['enlace_archivo'], "rb") as f_db:
+                                st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_bf})", data=f_db.read(), file_name=nom_bf, key=f"dl_al_bib_{act['id']}")
+                        else:
+                            renderizar_recurso_multimedia(act['enlace_archivo'])
 
     with tab_al_notas:
         st.markdown("### 📊 **Calificaciones**")
