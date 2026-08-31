@@ -49,6 +49,7 @@ st.markdown("""
         margin-top: 2px;
     }
     
+    /* Botones con fondo azul nítido y texto blanco forzado */
     .stButton > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
@@ -67,6 +68,7 @@ st.markdown("""
         box-shadow: 0 4px 10px rgba(29, 78, 216, 0.3) !important;
     }
     
+    /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
@@ -228,11 +230,20 @@ CREATE TABLE IF NOT EXISTS entregas (
     nota REAL,
     devolucion TEXT,
     tiempo_empleado_seg INTEGER,
+    reescritura_autorizada INTEGER DEFAULT 0,
     UNIQUE(actividad_id, estudiante_id),
     FOREIGN KEY(actividad_id) REFERENCES actividades(id),
     FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
 )
 """)
+
+try:
+    cols_ent = [col[1] for col in c.execute("PRAGMA table_info(entregas)").fetchall()]
+    if "reescritura_autorizada" not in cols_ent:
+        c.execute("ALTER TABLE entregas ADD COLUMN reescritura_autorizada INTEGER DEFAULT 0")
+        conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS asistencias (
@@ -597,7 +608,7 @@ El presente trabajo práctico tiene como propósito que los estudiantes analicen
 
 ### 📋 Parte A: Preguntas de Desarrollo y Análisis (60%)
 1. Explique los fundamentos teóricos principales de **{tema}** y su vinculación con los contenidos del cuatrimestre.
-2. Compare dos posturas o perspectivas doctrinales/teóricas relativas a este núcleo temático.
+2. Compare two posturas o perspectivas doctrinales/teóricas relativas a este núcleo temático.
 
 ### 🔘 Parte B: Opción Múltiple y Razonamiento (40%)
 1. ¿Cuál es el objetivo principal que persigue la aplicación de {tema}?
@@ -720,7 +731,6 @@ with col_h2:
 with col_h3:
     c_ia_btn, col_u_info, col_u_menu = st.columns([2.2, 2.8, 2])
     
-    # Asistente IA Flotante Amplio con Descarga Word / PDF
     with c_ia_btn:
         if u["rol"] == "profesor":
             with st.popover("🤖 Asistente IA"):
@@ -778,7 +788,7 @@ with col_h3:
         iniciales_u = "".join([p[0] for p in u['nombre'].split()[:2]]).upper()
         foto_path = u.get("foto_perfil")
         
-        if foto_path and os.path.exists(foto_path):
+        if foto_path and isinstance(foto_path, str) and os.path.exists(foto_path):
             with open(foto_path, "rb") as img_f:
                 b64_img = base64.b64encode(img_f.read()).decode()
             avatar_html = f"<img src='data:image/png;base64,{b64_img}' class='user-avatar-circle' />"
@@ -1507,7 +1517,7 @@ if u["rol"] == "profesor":
             
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
-                       e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega
+                       e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega, e.reescritura_autorizada
                 FROM entregas e
                 JOIN actividades a ON e.actividad_id = a.id
                 JOIN usuarios u ON e.estudiante_id = u.id
@@ -1517,7 +1527,9 @@ if u["rol"] == "profesor":
             if not entregas_db.empty:
                 for _, ent in entregas_db.iterrows():
                     t_min = f" | ⏱️ Tiempo empleado: {round(ent['tiempo_empleado_seg']/60, 1)} min" if ent['tiempo_empleado_seg'] else ""
-                    with st.expander(f"📌 {ent['alumno']} - {ent['examen']} ({ent['tipo_actividad']}) | Nota: {ent['nota']}{t_min}"):
+                    aut_badge = " [🔓 Reescritura Autorizada]" if ent['reescritura_autorizada'] == 1 else ""
+                    
+                    with st.expander(f"📌 {ent['alumno']} - {ent['examen']} ({ent['tipo_actividad']}){aut_badge} | Nota: {ent['nota']}{t_min}"):
                         st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
                         
                         if ent['preguntas_json'] and ent['respuesta_data']:
@@ -1584,7 +1596,6 @@ if u["rol"] == "profesor":
                             else:
                                 st.write("*(Sin texto desarrollado escrito en pantalla)*")
 
-                            # Botón de Descarga del Archivo Adjunto
                             texto_archivo_extraido = ""
                             if ent['archivo_ruta'] and isinstance(ent['archivo_ruta'], str) and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
@@ -1599,7 +1610,6 @@ if u["rol"] == "profesor":
                             elif ent['archivo_ruta']:
                                 st.warning(f"Archivo registrado: `{os.path.basename(str(ent['archivo_ruta']))}`.")
 
-                            # AUDITORÍA AUTOMÁTICA DE USO DE IA Y SIMILITUD WEB
                             texto_a_auditar = texto_alumno if texto_alumno else texto_archivo_extraido
                             if not texto_a_auditar and ent['archivo_ruta']:
                                 texto_a_auditar = os.path.basename(str(ent['archivo_ruta']))
@@ -1615,6 +1625,17 @@ if u["rol"] == "profesor":
                                 • <b>Dictamen:</b> {reporte['dictamen']}
                             </div>
                             """, unsafe_allow_html=True)
+
+                        # BOTÓN DE AUTORIZACIÓN DE REESCRITURA / NUEVO ENVÍO
+                        col_aut1, col_aut2 = st.columns([2, 2])
+                        with col_aut1:
+                            estado_aut = ent['reescritura_autorizada'] == 1
+                            if st.button("🔓 Autorizar nuevo envío / reescritura" if not estado_aut else "🔒 Revocar autorización de reescritura", key=f"btn_aut_{ent['entrega_id']}"):
+                                nuevo_estado = 0 if estado_aut else 1
+                                c.execute("UPDATE entregas SET reescritura_autorizada = ? WHERE id = ?", (nuevo_estado, ent['entrega_id']))
+                                conn.commit()
+                                st.success("Estado de autorización actualizado.")
+                                st.rerun()
 
                         with st.form(f"form_corr_{ent['entrega_id']}"):
                             n_nueva = st.number_input("Calificación Final", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
@@ -1721,15 +1742,25 @@ if u["rol"] == "profesor":
                     else:
                         st.info("Aún no hay registros de asistencia para graficar.")
 
-        # --- 5. PESTAÑA MENSAJES PRIVADOS ---
+        # --- 5. PESTAÑA MENSAJES PRIVADOS (BUZÓN DOCENTE CON NOTIFICACIONES) ---
         with tab_mensajes:
-            st.markdown("### ✉️ **Mensajería Privada con Estudiantes**")
+            st.markdown("### ✉️ **Buzón de Mensajes Privados**")
             
             if alumnos_curso.empty:
                 st.info("No hay alumnos matriculados en esta materia.")
             else:
-                map_al_msg = {f"{r['nombre']} ({r['email']})": r['id'] for _, r in alumnos_curso.iterrows()}
-                sel_al_chat = st.selectbox("Seleccionar estudiante para ver historial o escribirle:", list(map_al_msg.keys()))
+                # Marcar como leídos los mensajes recibidos de esta cátedra
+                c.execute("UPDATE mensajes_privados SET leido = 1 WHERE receptor_id = ? AND catedra_id = ?", (u["id"], cat_id))
+                conn.commit()
+
+                map_al_msg = {}
+                for _, r in alumnos_curso.iterrows():
+                    # Contar no leídos
+                    no_leidos_cnt = c.execute("SELECT COUNT(*) FROM mensajes_privados WHERE emisor_id = ? AND receptor_id = ? AND catedra_id = ? AND leido = 0", (r['id'], u["id"], cat_id)).fetchone()[0]
+                    tag_nl = f" (🔴 {no_leidos_cnt} nuevos)" if no_leidos_cnt > 0 else ""
+                    map_al_msg[f"{r['nombre']} ({r['email']}){tag_nl}"] = r['id']
+
+                sel_al_chat = st.selectbox("Seleccionar estudiante para conversar:", list(map_al_msg.keys()))
                 al_chat_id = map_al_msg[sel_al_chat]
 
                 st.markdown("#### **Historial de Conversación:**")
@@ -1757,11 +1788,11 @@ if u["rol"] == "profesor":
                         """, unsafe_allow_html=True)
 
                 with st.form(f"form_enviar_msg_priv_{al_chat_id}", clear_on_submit=True):
-                    txt_nuevo_msg = st.text_area("Escribir mensaje privado para el estudiante:")
-                    if st.form_submit_button("Enviar Mensaje Privado") and txt_nuevo_msg.strip():
+                    txt_nuevo_msg = st.text_area("Escribir respuesta:")
+                    if st.form_submit_button("Enviar Mensaje") and txt_nuevo_msg.strip():
                         c.execute("""
-                            INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha)
-                            VALUES (?, ?, ?, ?, ?)
+                            INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido)
+                            VALUES (?, ?, ?, ?, ?, 0)
                         """, (u["id"], al_chat_id, cat_id, txt_nuevo_msg.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
                         conn.commit()
                         st.success("Mensaje enviado.")
@@ -1873,19 +1904,56 @@ else:
                     ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                     ya_rendido = not ent_al.empty
                     
-                    with st.expander(f"{ico} {act['titulo']} ({tag_tipo}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
+                    # Verificar si tiene autorización de reescritura
+                    reescritura_permitida = False
+                    if ya_rendido:
+                        reescritura_permitida = ent_al.iloc[0]['reescritura_autorizada'] == 1
+
+                    estado_txt = "⏳ Pendiente" if not ya_rendido else ("🔓 Habilitado para Reenvío" if reescritura_permitida else "✅ Entregado")
+                    
+                    with st.expander(f"{ico} {act['titulo']} ({tag_tipo}) | {estado_txt}"):
                         st.write(f"**Consigna:** {act['descripcion']}")
                         
                         if act['enlace_archivo']:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                        if ya_rendido:
+                        if ya_rendido and not reescritura_permitida:
                             data_ent = ent_al.iloc[0]
                             st.success(f"Entregado el: {data_ent['fecha_entrega']}")
+                            
+                            # Opción para revisar el archivo enviado por el alumno
+                            if data_ent['archivo_ruta'] and isinstance(data_ent['archivo_ruta'], str) and os.path.exists(data_ent['archivo_ruta']):
+                                nom_orig = os.path.basename(data_ent['archivo_ruta'])
+                                with open(data_ent['archivo_ruta'], "rb") as f_down:
+                                    st.download_button(
+                                        label=f"📥 Ver / Descargar mi archivo enviado ({nom_orig})",
+                                        data=f_down.read(),
+                                        file_name=nom_orig,
+                                        key=f"dl_al_propio_{data_ent['id']}"
+                                    )
+                            elif data_ent['respuesta_data']:
+                                st.markdown(f"**Tu respuesta escrita:** {data_ent['respuesta_data']}")
+
                             if data_ent['nota'] is not None:
                                 st.metric("Calificación:", f"{data_ent['nota']}/10")
                                 st.info(f"**Devolución del Profesor:**\n{data_ent['devolucion']}")
+                            
+                            st.divider()
+                            if st.button("🔄 Solicitar Autorización de Reenvío al Docente", key=f"req_reenv_{act['id']}"):
+                                # Mandar un mensaje automático al profesor solicitando reescritura
+                                msg_auto = f"Hola profesor, le solicito autorización para volver a enviar mi trabajo en la actividad: '{act['titulo']}'."
+                                c.execute("""
+                                    INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido)
+                                    VALUES (?, ?, ?, ?, ?, 0)
+                                """, (u["id"], profesor_id_materia, materia_id, msg_auto, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                conn.commit()
+                                st.success("¡Solicitud enviada al profesor por mensajería privada!")
+
                         else:
+                            # Si no ha rendido O si tiene la reescritura autorizada
+                            if reescritura_permitida:
+                                st.warning("🔓 El profesor te ha autorizado a realizar un nuevo envío o reemplazar tu archivo.")
+
                             if act['tipo'] == "Cuestionario":
                                 st.warning(f"⏱️ Este examen tiene un tiempo límite de **{act['duracion_minutos']} minutos**.")
                                 
@@ -1895,91 +1963,100 @@ else:
                                         st.session_state.tiempo_inicio_examen = time.time()
                                         st.rerun()
 
-                            if st.session_state.examen_en_curso == act['id']:
-                                t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
-                                t_total = act['duracion_minutos'] * 60
-                                t_restante = max(0, t_total - t_pasado)
-                                
-                                mins, segs = divmod(t_restante, 60)
-                                st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
-                                
-                                pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
-                                rtas_seleccionadas = {}
-                                
-                                with st.form(f"form_rendir_{act['id']}"):
-                                    for idx, p in enumerate(pregs):
-                                        num_p = idx + 1
-                                        t_p = p.get("tipo", "multiple_choice")
-                                        
-                                        if t_p == "multiple_choice":
-                                            st.markdown(f"**Pregunta N° {num_p} (Opción Múltiple):** {p['enunciado']}")
-                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
-                                        
-                                        elif t_p == "verdadero_falso":
-                                            st.markdown(f"**Pregunta N° {num_p} (Verdadero / Falso):** {p['enunciado']}")
-                                            rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
-
-                                        elif t_p == "completar_espacios":
-                                            st.markdown(f"**Pregunta N° {num_p} (Completar Párrafo):**")
-                                            correctas = p['palabras_correctas']
-                                            banco_palabras = list(set(correctas + p.get('distractores', [])))
-                                            
-                                            st.markdown("🎯 **Banco de palabras disponibles:** " + " ".join([f"<span class='drag-word-box'>{w}</span>" for w in banco_palabras]), unsafe_allow_html=True)
-                                            
-                                            texto_limpio = p['enunciado']
-                                            for cor in correctas:
-                                                texto_limpio = texto_limpio.replace(f"[{cor}]", " `[ _____ ]` ")
-                                            st.markdown(f"> *{texto_limpio}*")
-                                            
-                                            resp_gaps = {}
-                                            cols_gaps = st.columns(len(correctas))
-                                            for g_idx, cor in enumerate(correctas):
-                                                with cols_gaps[g_idx]:
-                                                    resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar palabra)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
-                                            
-                                            rtas_seleccionadas[idx] = resp_gaps
-
-                                    if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
-                                        puntos = 0
-                                        total_puntos = len(pregs)
-                                        
+                                if st.session_state.examen_en_curso == act['id']:
+                                    t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
+                                    t_total = act['duracion_minutos'] * 60
+                                    t_restante = max(0, t_total - t_pasado)
+                                    
+                                    mins, segs = divmod(t_restante, 60)
+                                    st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
+                                    
+                                    pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
+                                    rtas_seleccionadas = {}
+                                    
+                                    with st.form(f"form_rendir_{act['id']}"):
                                         for idx, p in enumerate(pregs):
+                                            num_p = idx + 1
                                             t_p = p.get("tipo", "multiple_choice")
-                                            if t_p in ["multiple_choice", "verdadero_falso"]:
-                                                if rtas_seleccionadas.get(idx) == p['correcta']:
-                                                    puntos += 1
+                                            
+                                            if t_p == "multiple_choice":
+                                                st.markdown(f"**Pregunta N° {num_p} (Opción Múltiple):** {p['enunciado']}")
+                                                rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
+                                            
+                                            elif t_p == "verdadero_falso":
+                                                st.markdown(f"**Pregunta N° {num_p} (Verdadero / Falso):** {p['enunciado']}")
+                                                rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
+
                                             elif t_p == "completar_espacios":
+                                                st.markdown(f"**Pregunta N° {num_p} (Completar Párrafo):**")
                                                 correctas = p['palabras_correctas']
-                                                gaps_al = rtas_seleccionadas.get(idx, {})
-                                                aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
-                                                puntos += (aciertos_gaps / len(correctas)) if correctas else 1
-                                        
-                                        nota_calc = round((puntos / total_puntos) * 10, 2) if total_puntos > 0 else 10.0
-                                        dev_auto = f"Autocorrección del sistema: Calificación obtenida {nota_calc}/10."
-                                        
-                                        c.execute("""
-                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
-                                        conn.commit()
-                                        st.session_state.examen_en_curso = None
-                                        st.session_state.tiempo_inicio_examen = None
-                                        st.success(f"Examen finalizado. Nota: {nota_calc}/10")
-                                        st.rerun()
+                                                banco_palabras = list(set(correctas + p.get('distractores', [])))
+                                                
+                                                st.markdown("🎯 **Banco de palabras disponibles:** " + " ".join([f"<span class='drag-word-box'>{w}</span>" for w in banco_palabras]), unsafe_allow_html=True)
+                                                
+                                                texto_limpio = p['enunciado']
+                                                for cor in correctas:
+                                                    texto_limpio = texto_limpio.replace(f"[{cor}]", " `[ _____ ]` ")
+                                                st.markdown(f"> *{texto_limpio}*")
+                                                
+                                                resp_gaps = {}
+                                                cols_gaps = st.columns(len(correctas))
+                                                for g_idx, cor in enumerate(correctas):
+                                                    with cols_gaps[g_idx]:
+                                                        resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar palabra)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
+                                                
+                                                rtas_seleccionadas[idx] = resp_gaps
+
+                                        if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
+                                            puntos = 0
+                                            total_puntos = len(pregs)
+                                            
+                                            for idx, p in enumerate(pregs):
+                                                t_p = p.get("tipo", "multiple_choice")
+                                                if t_p in ["multiple_choice", "verdadero_falso"]:
+                                                    if rtas_seleccionadas.get(idx) == p['correcta']:
+                                                        puntos += 1
+                                                elif t_p == "completar_espacios":
+                                                    correctas = p['palabras_correctas']
+                                                    gaps_al = rtas_seleccionadas.get(idx, {})
+                                                    aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
+                                                    puntos += (aciertos_gaps / len(correctas)) if correctas else 1
+                                            
+                                            nota_calc = round((puntos / total_puntos) * 10, 2) if total_puntos > 0 else 10.0
+                                            dev_auto = f"Autocorrección del sistema: Calificación obtenida {nota_calc}/10."
+                                            
+                                            c.execute("""
+                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg, reescritura_autorizada)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                                                ON CONFLICT(actividad_id, estudiante_id)
+                                                DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data,
+                                                              nota=excluded.nota, devolucion=excluded.devolucion, tiempo_empleado_seg=excluded.tiempo_empleado_seg,
+                                                              reescritura_autorizada=0
+                                            """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
+                                            conn.commit()
+                                            st.session_state.examen_en_curso = None
+                                            st.session_state.tiempo_inicio_examen = None
+                                            st.success(f"Examen finalizado. Nota: {nota_calc}/10")
+                                            st.rerun()
                             else:
                                 with st.form(f"form_tarea_{act['id']}"):
                                     rta_t = st.text_area("Desarrollo de la entrega (texto / informe)")
                                     arch = st.file_uploader("Adjuntar archivo (PDF, Word, etc.)", type=["pdf", "docx", "zip", "txt", "xlsx", "pptx"])
-                                    if st.form_submit_button("Enviar Tarea"):
+                                    if st.form_submit_button("Enviar o Reenviar Tarea"):
                                         r_path = None
                                         if arch is not None:
                                             r_path = os.path.join(CARPETA_ENTREGAS, f"{u['id']}_{act['id']}_{arch.name}")
                                             with open(r_path, "wb") as f:
                                                 f.write(arch.getbuffer())
-                                        c.execute("INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta) VALUES (?, ?, ?, ?, ?)",
-                                                  (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_t, r_path))
+                                        c.execute("""
+                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta, reescritura_autorizada)
+                                            VALUES (?, ?, ?, ?, ?, 0)
+                                            ON CONFLICT(actividad_id, estudiante_id)
+                                            DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data,
+                                                          archivo_ruta=excluded.archivo_ruta, reescritura_autorizada=0
+                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_t, r_path))
                                         conn.commit()
-                                        st.success("Tarea enviada correctamente.")
+                                        st.success("Tarea enviada/actualizada correctamente.")
                                         st.rerun()
 
     with tab_al_notas:
@@ -2037,6 +2114,10 @@ else:
     with tab_al_chat:
         st.markdown(f"### ✉️ **Mensajes Privados con el Docente: {profesor_nom_materia}**")
         
+        # Marcar mensajes del profesor como leídos
+        c.execute("UPDATE mensajes_privados SET leido = 1 WHERE receptor_id = ? AND catedra_id = ?", (u["id"], materia_id))
+        conn.commit()
+
         mensajes_priv_al = pd.read_sql("""
             SELECT m.id, m.mensaje, m.fecha, m.emisor_id, u.nombre as emisor_nombre, u.rol as emisor_rol
             FROM mensajes_privados m
@@ -2064,8 +2145,8 @@ else:
             txt_nuevo_msg_al = st.text_area("Escribir consulta o mensaje al docente:")
             if st.form_submit_button("Enviar Mensaje al Docente") and txt_nuevo_msg_al.strip():
                 c.execute("""
-                    INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha)
-                    VALUES (?, ?, ?, ?, ?)
+                    INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido)
+                    VALUES (?, ?, ?, ?, ?, 0)
                 """, (u["id"], profesor_id_materia, materia_id, txt_nuevo_msg_al.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
                 conn.commit()
                 st.success("Mensaje enviado al docente.")
