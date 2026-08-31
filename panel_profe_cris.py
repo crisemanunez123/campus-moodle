@@ -86,6 +86,24 @@ st.markdown("""
     .q-wrong { background-color: #ffe4e6; border-left: 5px solid #e11d48; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #881337 !important; }
     .task-response-box { background-color: #f1f5f9; border-left: 5px solid #1b3a6b; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
     .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
+    
+    /* Estilos del Foro */
+    .forum-msg-docente {
+        background-color: #e0f2fe;
+        border-left: 5px solid #0284c7;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+    }
+    .forum-msg-alumno {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 5px solid #64748b;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -190,6 +208,18 @@ CREATE TABLE IF NOT EXISTS asistencias (
     UNIQUE(catedra_id, estudiante_id, fecha),
     FOREIGN KEY(catedra_id) REFERENCES catedras(id),
     FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+)
+""")
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS foro_mensajes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actividad_id INTEGER,
+    usuario_id INTEGER,
+    mensaje TEXT,
+    fecha TEXT,
+    FOREIGN KEY(actividad_id) REFERENCES actividades(id),
+    FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
 )
 """)
 
@@ -447,12 +477,17 @@ if u["rol"] == "profesor":
                 if df_secc.empty:
                     st.warning("Primero creá al menos una sección arriba para añadir actividades.")
                 else:
-                    tipo_modulo = st.selectbox("Tipo de recurso:", ["⏱️ Cuestionario / Examen Dinámico por Tiempo", "📝 Tarea (Entrega de Archivo/Texto)", "📁 Archivo / URL"])
+                    tipo_modulo = st.selectbox("Tipo de recurso:", [
+                        "💬 Foro (Debate e Interacción)",
+                        "⏱️ Cuestionario / Examen Dinámico por Tiempo",
+                        "📝 Tarea (Entrega de Archivo/Texto)",
+                        "📁 Archivo / URL"
+                    ])
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / examen", placeholder="Ej: Examen Parcial de Derecho / Trabajo Práctico")
-                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los estudiantes...")
+                    tit_act = st.text_input("Título de la actividad / foro / examen", placeholder="Ej: Foro de Debate / Examen Parcial / Tarea 1")
+                    desc_act = st.text_area("Descripción / Consigna / Tema del debate", placeholder="Instrucciones para los participantes...")
                     f_lim = st.date_input("Fecha Límite", min_value=date.today())
 
                     dur_min = 0
@@ -522,11 +557,19 @@ if u["rol"] == "profesor":
 
                     enlace_url = st.text_input("Enlace web / URL externa (opcional)")
 
-                    if st.button("🚀 Publicar Actividad / Examen en el Curso"):
+                    if st.button("🚀 Publicar Actividad / Recurso en el Curso"):
                         if not tit_act.strip():
                             st.error("Por favor completá el título de la actividad.")
                         else:
-                            tipo_db = "Cuestionario" if "Examen" in tipo_modulo else ("Tarea" if "Tarea" in tipo_modulo else "Archivo")
+                            if "Foro" in tipo_modulo:
+                                tipo_db = "Foro"
+                            elif "Examen" in tipo_modulo:
+                                tipo_db = "Cuestionario"
+                            elif "Tarea" in tipo_modulo:
+                                tipo_db = "Tarea"
+                            else:
+                                tipo_db = "Archivo"
+
                             json_str = json.dumps(preguntas_generadas, ensure_ascii=False) if tipo_db == "Cuestionario" else None
                             
                             c.execute("""
@@ -534,7 +577,7 @@ if u["rol"] == "profesor":
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, enlace_url))
                             conn.commit()
-                            st.success("¡Actividad / Examen publicado exitosamente!")
+                            st.success("¡Publicado exitosamente!")
                             st.rerun()
 
             # LISTA DE SECCIONES CON EDICIÓN COMPLETA
@@ -562,12 +605,14 @@ if u["rol"] == "profesor":
 
                     with col_s_del:
                         if st.button("🗑️ Borrar", key=f"del_sec_{sec['id']}"):
+                            c.execute("DELETE FROM foro_mensajes WHERE actividad_id IN (SELECT id FROM actividades WHERE seccion_id = ?)", (sec['id'],))
+                            c.execute("DELETE FROM entregas WHERE actividad_id IN (SELECT id FROM actividades WHERE seccion_id = ?)", (sec['id'],))
                             c.execute("DELETE FROM actividades WHERE seccion_id = ?", (sec['id'],))
                             c.execute("DELETE FROM secciones WHERE id = ?", (sec['id'],))
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES CON FORMATO PLEGABLE (SOLO SE ABREN AL HACER CLIC)
+                    # ACTIVIDADES CON FORMATO PLEGABLE
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
@@ -575,20 +620,59 @@ if u["rol"] == "profesor":
                         for _, a in acts.iterrows():
                             col_act_main, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
                             
-                            ico = "⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else "🔗")
+                            ico = "💬" if a['tipo'] == 'Foro' else ("⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else "🔗"))
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
                             
                             with col_act_main:
                                 with st.expander(f"{ico} {a['titulo']} ({a['tipo']}){t_lbl} — Vence: {a['fecha_limite']}"):
                                     if a['descripcion']:
-                                        st.markdown(f"**📌 Consigna / Contenido:**")
+                                        st.markdown(f"**📌 Consigna / Tema:**")
                                         st.markdown(a['descripcion'])
                                     else:
                                         st.caption("*(Sin descripción consignada)*")
                                     
                                     if a['enlace_archivo']:
                                         st.markdown(f"🔗 **Enlace adjunto:** [{a['enlace_archivo']}]({a['enlace_archivo']})")
-                            
+
+                                    # SI ES UN FORO: RENDERIZAR MENSAJES Y CUADRO DE INTERACCIÓN
+                                    if a['tipo'] == 'Foro':
+                                        st.divider()
+                                        st.markdown("#### 💬 **Participaciones en el Foro:**")
+                                        
+                                        mensajes_foro = pd.read_sql("""
+                                            SELECT m.id, m.mensaje, m.fecha, u.nombre, u.rol
+                                            FROM foro_mensajes m
+                                            JOIN usuarios u ON m.usuario_id = u.id
+                                            WHERE m.actividad_id = ?
+                                            ORDER BY m.id ASC
+                                        """, conn, params=(a['id'],))
+
+                                        if mensajes_foro.empty:
+                                            st.info("Aún no hay mensajes en este foro. ¡Sé el primero en participar!")
+                                        else:
+                                            for _, m_row in mensajes_foro.iterrows():
+                                                es_docente = (m_row['rol'] == 'profesor')
+                                                clase_css = "forum-msg-docente" if es_docente else "forum-msg-alumno"
+                                                badge_rol = "👨‍🏫 Docente" if es_docente else "🎓 Estudiante"
+                                                
+                                                st.markdown(f"""
+                                                <div class='{clase_css}'>
+                                                    <b>{m_row['nombre']}</b> &nbsp;<small style='color:#64748b;'>({badge_rol}) — {m_row['fecha']}</small><br>
+                                                    <p style='margin-top: 6px; margin-bottom: 0px;'>{m_row['mensaje']}</p>
+                                                </div>
+                                                """, unsafe_allow_html=True)
+
+                                        with st.form(f"form_responder_foro_profe_{a['id']}", clear_on_submit=True):
+                                            txt_respuesta = st.text_area("Escribir aporte / intervención del docente en el foro:", key=f"txt_foro_p_{a['id']}")
+                                            if st.form_submit_button("Publicar en el Foro") and txt_respuesta.strip():
+                                                c.execute("""
+                                                    INSERT INTO foro_mensajes (actividad_id, usuario_id, mensaje, fecha)
+                                                    VALUES (?, ?, ?, ?)
+                                                """, (a['id'], u['id'], txt_respuesta.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                                conn.commit()
+                                                st.success("Mensaje publicado.")
+                                                st.rerun()
+
                             with col_act_edit:
                                 with st.popover("✏️ Editar", key=f"pop_act_edit_{a['id']}"):
                                     with st.form(f"form_edit_act_{a['id']}"):
@@ -628,6 +712,7 @@ if u["rol"] == "profesor":
 
                             with col_act_del:
                                 if st.button("🗑️", key=f"del_act_{a['id']}", help="Eliminar actividad"):
+                                    c.execute("DELETE FROM foro_mensajes WHERE actividad_id = ?", (a['id'],))
                                     c.execute("DELETE FROM entregas WHERE actividad_id = ?", (a['id'],))
                                     c.execute("DELETE FROM actividades WHERE id = ?", (a['id'],))
                                     conn.commit()
@@ -922,7 +1007,7 @@ if u["rol"] == "profesor":
                 st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE
+# 🎓 VISTA ESTUDIANTE (CON PARTICIPACIÓN EN EL FORO)
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -950,114 +1035,160 @@ else:
             acts_al = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(s['id'],))
             
             for _, act in acts_al.iterrows():
-                ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
-                ya_rendido = not ent_al.empty
+                ico = "💬" if act['tipo'] == 'Foro' else ("⏱️" if act['tipo'] == 'Cuestionario' else ("📄" if act['tipo'] == 'Tarea' else "🔗"))
                 
-                with st.expander(f"📌 {act['titulo']} ({act['tipo']}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
-                    st.write(f"**Consigna:** {act['descripcion']}")
-                    
-                    if ya_rendido:
-                        data_ent = ent_al.iloc[0]
-                        st.success(f"Entregado el: {data_ent['fecha_entrega']}")
-                        if data_ent['nota'] is not None:
-                            st.metric("Calificación:", f"{data_ent['nota']}/10")
-                            st.info(f"**Devolución del Profesor:**\n{data_ent['devolucion']}")
-                    else:
-                        if act['tipo'] == "Cuestionario":
-                            st.warning(f"⏱️ Este examen tiene un tiempo límite de **{act['duracion_minutos']} minutos**.")
-                            
-                            if st.session_state.examen_en_curso != act['id']:
-                                if st.button("🚀 Comenzar Examen Ahora", key=f"start_{act['id']}"):
-                                    st.session_state.examen_en_curso = act['id']
-                                    st.session_state.tiempo_inicio_examen = time.time()
-                                    st.rerun()
+                # Renderizado específico según tipo
+                if act['tipo'] == "Foro":
+                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}) — Vence: {act['fecha_limite']}"):
+                        st.markdown(f"**📌 Tema de debate / Consigna:**")
+                        st.write(act['descripcion'])
+                        
+                        st.divider()
+                        st.markdown("#### 💬 **Hilo de Debate:**")
+                        
+                        mensajes_foro = pd.read_sql("""
+                            SELECT m.id, m.mensaje, m.fecha, u.nombre, u.rol
+                            FROM foro_mensajes m
+                            JOIN usuarios u ON m.usuario_id = u.id
+                            WHERE m.actividad_id = ?
+                            ORDER BY m.id ASC
+                        """, conn, params=(act['id'],))
 
-                            if st.session_state.examen_en_curso == act['id']:
-                                t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
-                                t_total = act['duracion_minutos'] * 60
-                                t_restante = max(0, t_total - t_pasado)
-                                
-                                mins, segs = divmod(t_restante, 60)
-                                st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
-                                
-                                pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
-                                rtas_seleccionadas = {}
-                                
-                                with st.form(f"form_rendir_{act['id']}"):
-                                    for idx, p in enumerate(pregs):
-                                        num_p = idx + 1
-                                        t_p = p.get("tipo", "multiple_choice")
-                                        
-                                        if t_p == "multiple_choice":
-                                            st.markdown(f"**Pregunta N° {num_p} (Opción Múltiple):** {p['enunciado']}")
-                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
-                                        
-                                        elif t_p == "verdadero_falso":
-                                            st.markdown(f"**Pregunta N° {num_p} (Verdadero / Falso):** {p['enunciado']}")
-                                            rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
-
-                                        elif t_p == "completar_espacios":
-                                            st.markdown(f"**Pregunta N° {num_p} (Completar Párrafo):**")
-                                            correctas = p['palabras_correctas']
-                                            banco_palabras = list(set(correctas + p.get('distractores', [])))
-                                            
-                                            st.markdown("🎯 **Banco de palabras disponibles:** " + " ".join([f"<span class='drag-word-box'>{w}</span>" for w in banco_palabras]), unsafe_allow_html=True)
-                                            
-                                            texto_limpio = p['enunciado']
-                                            for cor in correctas:
-                                                texto_limpio = texto_limpio.replace(f"[{cor}]", " `[ _____ ]` ")
-                                            st.markdown(f"> *{texto_limpio}*")
-                                            
-                                            resp_gaps = {}
-                                            cols_gaps = st.columns(len(correctas))
-                                            for g_idx, cor in enumerate(correctas):
-                                                with cols_gaps[g_idx]:
-                                                    resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar palabra)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
-                                            
-                                            rtas_seleccionadas[idx] = resp_gaps
-
-                                    if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
-                                        puntos = 0
-                                        total_puntos = len(pregs)
-                                        
-                                        for idx, p in enumerate(pregs):
-                                            t_p = p.get("tipo", "multiple_choice")
-                                            if t_p in ["multiple_choice", "verdadero_falso"]:
-                                                if rtas_seleccionadas.get(idx) == p['correcta']:
-                                                    puntos += 1
-                                            elif t_p == "completar_espacios":
-                                                correctas = p['palabras_correctas']
-                                                gaps_al = rtas_seleccionadas.get(idx, {})
-                                                aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
-                                                puntos += (aciertos_gaps / len(correctas)) if correctas else 1
-                                        
-                                        nota_calc = round((puntos / total_puntos) * 10, 2) if total_puntos > 0 else 10.0
-                                        dev_auto = f"Autocorrección del sistema: Calificación obtenida {nota_calc}/10."
-                                        
-                                        c.execute("""
-                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?)
-                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
-                                        conn.commit()
-                                        st.session_state.examen_en_curso = None
-                                        st.session_state.tiempo_inicio_examen = None
-                                        st.success(f"Examen finalizado. Nota: {nota_calc}/10")
-                                        st.rerun()
+                        if mensajes_foro.empty:
+                            st.info("Aún no hay mensajes en este foro. ¡Sé el primero en participar!")
                         else:
-                            with st.form(f"form_tarea_{act['id']}"):
-                                rta_t = st.text_area("Desarrollo de la entrega (texto / informe)")
-                                arch = st.file_uploader("Adjuntar archivo (PDF, Word, etc.)", type=["pdf", "docx", "zip", "txt", "xlsx", "pptx"])
-                                if st.form_submit_button("Enviar Tarea"):
-                                    r_path = None
-                                    if arch is not None:
-                                        r_path = os.path.join(CARPETA_ENTREGAS, f"{u['id']}_{act['id']}_{arch.name}")
-                                        with open(r_path, "wb") as f:
-                                            f.write(arch.getbuffer())
-                                    c.execute("INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta) VALUES (?, ?, ?, ?, ?)",
-                                              (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_t, r_path))
-                                    conn.commit()
-                                    st.success("Tarea enviada correctamente.")
-                                    st.rerun()
+                            for _, m_row in mensajes_foro.iterrows():
+                                es_docente = (m_row['rol'] == 'profesor')
+                                clase_css = "forum-msg-docente" if es_docente else "forum-msg-alumno"
+                                badge_rol = "👨‍🏫 Docente" if es_docente else "🎓 Estudiante"
+                                
+                                st.markdown(f"""
+                                <div class='{clase_css}'>
+                                    <b>{m_row['nombre']}</b> &nbsp;<small style='color:#64748b;'>({badge_rol}) — {m_row['fecha']}</small><br>
+                                    <p style='margin-top: 6px; margin-bottom: 0px;'>{m_row['mensaje']}</p>
+                                </div>
+                                """, unsafe_allow_html=True)
+
+                        with st.form(f"form_responder_foro_al_{act['id']}", clear_on_submit=True):
+                            txt_resp_al = st.text_area("Escribir mi aporte en el foro:", key=f"txt_foro_al_{act['id']}")
+                            if st.form_submit_button("Publicar en el Foro") and txt_resp_al.strip():
+                                c.execute("""
+                                    INSERT INTO foro_mensajes (actividad_id, usuario_id, mensaje, fecha)
+                                    VALUES (?, ?, ?, ?)
+                                """, (act['id'], u['id'], txt_resp_al.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                conn.commit()
+                                st.success("Aporte publicado en el foro.")
+                                st.rerun()
+
+                else:
+                    ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
+                    ya_rendido = not ent_al.empty
+                    
+                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
+                        st.write(f"**Consigna:** {act['descripcion']}")
+                        
+                        if ya_rendido:
+                            data_ent = ent_al.iloc[0]
+                            st.success(f"Entregado el: {data_ent['fecha_entrega']}")
+                            if data_ent['nota'] is not None:
+                                st.metric("Calificación:", f"{data_ent['nota']}/10")
+                                st.info(f"**Devolución del Profesor:**\n{data_ent['devolucion']}")
+                        else:
+                            if act['tipo'] == "Cuestionario":
+                                st.warning(f"⏱️ Este examen tiene un tiempo límite de **{act['duracion_minutos']} minutos**.")
+                                
+                                if st.session_state.examen_en_curso != act['id']:
+                                    if st.button("🚀 Comenzar Examen Ahora", key=f"start_{act['id']}"):
+                                        st.session_state.examen_en_curso = act['id']
+                                        st.session_state.tiempo_inicio_examen = time.time()
+                                        st.rerun()
+
+                                if st.session_state.examen_en_curso == act['id']:
+                                    t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
+                                    t_total = act['duracion_minutos'] * 60
+                                    t_restante = max(0, t_total - t_pasado)
+                                    
+                                    mins, segs = divmod(t_restante, 60)
+                                    st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
+                                    
+                                    pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
+                                    rtas_seleccionadas = {}
+                                    
+                                    with st.form(f"form_rendir_{act['id']}"):
+                                        for idx, p in enumerate(pregs):
+                                            num_p = idx + 1
+                                            t_p = p.get("tipo", "multiple_choice")
+                                            
+                                            if t_p == "multiple_choice":
+                                                st.markdown(f"**Pregunta N° {num_p} (Opción Múltiple):** {p['enunciado']}")
+                                                rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
+                                            
+                                            elif t_p == "verdadero_falso":
+                                                st.markdown(f"**Pregunta N° {num_p} (Verdadero / Falso):** {p['enunciado']}")
+                                                rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
+
+                                            elif t_p == "completar_espacios":
+                                                st.markdown(f"**Pregunta N° {num_p} (Completar Párrafo):**")
+                                                correctas = p['palabras_correctas']
+                                                banco_palabras = list(set(correctas + p.get('distractores', [])))
+                                                
+                                                st.markdown("🎯 **Banco de palabras disponibles:** " + " ".join([f"<span class='drag-word-box'>{w}</span>" for w in banco_palabras]), unsafe_allow_html=True)
+                                                
+                                                texto_limpio = p['enunciado']
+                                                for cor in correctas:
+                                                    texto_limpio = texto_limpio.replace(f"[{cor}]", " `[ _____ ]` ")
+                                                st.markdown(f"> *{texto_limpio}*")
+                                                
+                                                resp_gaps = {}
+                                                cols_gaps = st.columns(len(correctas))
+                                                for g_idx, cor in enumerate(correctas):
+                                                    with cols_gaps[g_idx]:
+                                                        resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar palabra)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
+                                                
+                                                rtas_seleccionadas[idx] = resp_gaps
+
+                                        if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
+                                            puntos = 0
+                                            total_puntos = len(pregs)
+                                            
+                                            for idx, p in enumerate(pregs):
+                                                t_p = p.get("tipo", "multiple_choice")
+                                                if t_p in ["multiple_choice", "verdadero_falso"]:
+                                                    if rtas_seleccionadas.get(idx) == p['correcta']:
+                                                        puntos += 1
+                                                elif t_p == "completar_espacios":
+                                                    correctas = p['palabras_correctas']
+                                                    gaps_al = rtas_seleccionadas.get(idx, {})
+                                                    aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
+                                                    puntos += (aciertos_gaps / len(correctas)) if correctas else 1
+                                            
+                                            nota_calc = round((puntos / total_puntos) * 10, 2) if total_puntos > 0 else 10.0
+                                            dev_auto = f"Autocorrección del sistema: Calificación obtenida {nota_calc}/10."
+                                            
+                                            c.execute("""
+                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg)
+                                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                                            """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
+                                            conn.commit()
+                                            st.session_state.examen_en_curso = None
+                                            st.session_state.tiempo_inicio_examen = None
+                                            st.success(f"Examen finalizado. Nota: {nota_calc}/10")
+                                            st.rerun()
+                            else:
+                                with st.form(f"form_tarea_{act['id']}"):
+                                    rta_t = st.text_area("Desarrollo de la entrega (texto / informe)")
+                                    arch = st.file_uploader("Adjuntar archivo (PDF, Word, etc.)", type=["pdf", "docx", "zip", "txt", "xlsx", "pptx"])
+                                    if st.form_submit_button("Enviar Tarea"):
+                                        r_path = None
+                                        if arch is not None:
+                                            r_path = os.path.join(CARPETA_ENTREGAS, f"{u['id']}_{act['id']}_{arch.name}")
+                                            with open(r_path, "wb") as f:
+                                                f.write(arch.getbuffer())
+                                        c.execute("INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta) VALUES (?, ?, ?, ?, ?)",
+                                                  (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_t, r_path))
+                                        conn.commit()
+                                        st.success("Tarea enviada correctamente.")
+                                        st.rerun()
 
     with tab_al_notas:
         st.markdown("### **Mis Calificaciones**")
