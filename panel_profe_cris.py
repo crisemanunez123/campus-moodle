@@ -1076,7 +1076,6 @@ elif u["rol"] == "profesor":
                     aut_badge = " [🔓 Reescritura Autorizada]" if ent['reescritura_autorizada'] == 1 else ""
                     nota_txt = f"Nota: {ent['nota']}" if ent['nota'] is not None else "Sin calificar"
                     
-                    # Calcular porcentaje de IA para mostrar en el título con color condicional
                     texto_alumno_prev = ent['respuesta_data'] if ent['respuesta_data'] else ""
                     texto_archivo_prev = extraer_texto_archivo_entrega(ent['archivo_ruta']) if ent['archivo_ruta'] else ""
                     texto_auditoria_prev = texto_alumno_prev if texto_alumno_prev else texto_archivo_prev
@@ -1085,9 +1084,10 @@ elif u["rol"] == "profesor":
                     
                     rep_prev = analizar_antifraude_ia(texto_auditoria_prev, get_config("gemini_api_key", ""))
                     pct_ia_val = rep_prev['pct_ia']
-                    color_ia = rep_prev['color'] # #ef4444 si >50, #22c55e si <=50
+                    color_ia = rep_prev['color']
                     
-                    titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: <span style='color:{color_ia}; font-weight:bold;'>{pct_ia_val}%</span> | {nota_txt}{t_min}{aut_badge}"
+                    # Título limpio del expander sin etiquetas HTML crudas rotas
+                    titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: {pct_ia_val}% | {nota_txt}{t_min}{aut_badge}"
 
                     with st.expander(titulo_expander, expanded=False):
                         st.markdown(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
