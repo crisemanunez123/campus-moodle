@@ -11,47 +11,61 @@ st.set_page_config(page_title="Moodle Campus", page_icon="🎓", layout="wide")
 CARPETA_ENTREGAS = "entregas_alumnos"
 os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
 
-# --- ESTILOS CSS CLÓNICOS DE MOODLE 4 (BOOST) ---
+# --- ESTILOS CSS CLÓNICOS DE MOODLE 4 (FORZADO CLARO Y LEGIBLE) ---
 st.markdown("""
 <style>
+    /* Forzar fondo general claro y textos oscuros */
     .stApp {
-        background-color: #f8f9fa;
+        background-color: #f4f6f9 !important;
+        color: #1d2125 !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
+    
+    /* Textos y títulos */
+    h1, h2, h3, h4, h5, h6, p, span, label {
+        color: #1d2125 !important;
+    }
+    
+    /* Botones estilo Moodle (Azul institucional) */
+    .stButton > button {
+        background-color: #0f6cbf !important;
+        color: #ffffff !important;
+        border-radius: 6px !important;
+        border: none !important;
+        font-weight: 600 !important;
+    }
+    .stButton > button:hover {
+        background-color: #094478 !important;
+        color: #ffffff !important;
+    }
+    
+    /* Marca Moodle Naranja */
     .moodle-brand {
         font-size: 26px;
         font-weight: 800;
-        color: #f98012;
+        color: #f98012 !important;
     }
+    
+    /* Tarjetas de cursos */
     .course-card {
-        background: #ffffff;
-        border: 1px solid #e9ecef;
-        border-radius: 8px;
+        background: #ffffff !important;
+        border: 1px solid #dee2e6 !important;
+        border-radius: 8px !important;
         overflow: hidden;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        box-shadow: 0 2px 4px rgba(0,0,0,0.06);
         margin-bottom: 15px;
     }
-    .card-banner-1 { height: 110px; background: linear-gradient(135deg, #d3d3d3 0%, #a8a8a8 100%); }
+    .card-banner-1 { height: 110px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); }
     .card-banner-2 { height: 110px; background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%); }
     .card-banner-3 { height: 110px; background: linear-gradient(135deg, #8a2387 0%, #e94057 50%, #f27121 100%); }
     .card-banner-4 { height: 110px; background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%); }
     
-    .course-card-body {
-        padding: 15px;
-    }
-    .course-title {
-        font-size: 16px;
-        font-weight: 600;
-        color: #0f6cbf;
-        margin-bottom: 4px;
-    }
-    .course-cat {
-        font-size: 13px;
-        color: #6c757d;
-    }
+    .course-card-body { padding: 15px; background: #ffffff !important; }
+    .course-title { font-size: 16px; font-weight: 600; color: #0f6cbf !important; margin-bottom: 4px; }
+    .course-cat { font-size: 13px; color: #6c757d !important; }
     .timer-box {
         background: #dc3545;
-        color: white;
+        color: white !important;
         padding: 10px;
         border-radius: 6px;
         font-weight: bold;
@@ -59,8 +73,8 @@ st.markdown("""
         text-align: center;
         margin-bottom: 15px;
     }
-    .q-correct { background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin-bottom: 8px; border-radius: 4px; }
-    .q-wrong { background-color: #f8d7da; border-left: 5px solid #dc3545; padding: 10px; margin-bottom: 8px; border-radius: 4px; }
+    .q-correct { background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #155724 !important; }
+    .q-wrong { background-color: #f8d7da; border-left: 5px solid #dc3545; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #721c24 !important; }
 </style>
 """, unsafe_allow_html=True)
 
