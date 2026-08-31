@@ -49,7 +49,6 @@ st.markdown("""
         margin-top: 2px;
     }
     
-    /* Botones con fondo azul nítido y texto blanco forzado */
     .stButton > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
@@ -68,7 +67,6 @@ st.markdown("""
         box-shadow: 0 4px 10px rgba(29, 78, 216, 0.3) !important;
     }
     
-    /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
@@ -275,15 +273,6 @@ CREATE TABLE IF NOT EXISTS mensajes_privados (
     FOREIGN KEY(catedra_id) REFERENCES catedras(id)
 )
 """)
-
-# Migración para campo leido en mensajes privados
-try:
-    cols_msg = [col[1] for col in c.execute("PRAGMA table_info(mensajes_privados)").fetchall()]
-    if "leido" not in cols_msg:
-        c.execute("ALTER TABLE mensajes_privados ADD COLUMN leido INTEGER DEFAULT 0")
-        conn.commit()
-except Exception:
-    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS calificaciones_periodos (
@@ -493,7 +482,7 @@ Created by Tec. Cristian Nuñez
     return enviar_correo_smtp(destinatario, asunto, cuerpo)
 
 def extraer_texto_archivo_entrega(ruta_archivo):
-    if not ruta_archivo or not os.path.exists(ruta_archivo):
+    if not ruta_archivo or not isinstance(ruta_archivo, str) or not os.path.exists(ruta_archivo):
         return ""
     try:
         with open(ruta_archivo, "r", encoding="utf-8", errors="ignore") as f:
@@ -1597,7 +1586,7 @@ if u["rol"] == "profesor":
 
                             # Botón de Descarga del Archivo Adjunto
                             texto_archivo_extraido = ""
-                            if ent['archivo_ruta'] and os.path.exists(ent['archivo_ruta']):
+                            if ent['archivo_ruta'] and isinstance(ent['archivo_ruta'], str) and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
                                 texto_archivo_extraido = extraer_texto_archivo_entrega(ent['archivo_ruta'])
                                 with open(ent['archivo_ruta'], "rb") as f_adj:
@@ -1608,12 +1597,12 @@ if u["rol"] == "profesor":
                                         key=f"dl_{ent['entrega_id']}"
                                     )
                             elif ent['archivo_ruta']:
-                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}`.")
+                                st.warning(f"Archivo registrado: `{os.path.basename(str(ent['archivo_ruta']))}`.")
 
                             # AUDITORÍA AUTOMÁTICA DE USO DE IA Y SIMILITUD WEB
                             texto_a_auditar = texto_alumno if texto_alumno else texto_archivo_extraido
                             if not texto_a_auditar and ent['archivo_ruta']:
-                                texto_a_auditar = os.path.basename(ent['archivo_ruta'])
+                                texto_a_auditar = os.path.basename(str(ent['archivo_ruta']))
 
                             api_key_auditoria = get_config("gemini_api_key", "")
                             reporte = analizar_antifraude_ia(texto_a_auditar, api_key_auditoria)
