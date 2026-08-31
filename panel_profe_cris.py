@@ -102,7 +102,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
-# Auto-migrar columnas en caso de bases de datos previas
 try:
     cols_usuarios = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
     if "email" not in cols_usuarios:
@@ -344,7 +343,7 @@ if u["rol"] == "profesor":
             smtp_mail_act = get_config("smtp_email", "")
             smtp_pass_act = get_config("smtp_password", "")
             n_mail = st.text_input("Tu Gmail emisor", value=smtp_mail_act)
-            n_pass = st.text_input("Contraseña de Aplicación (16 letras)", value=smtp_pass_act, type="password", help="Generala en tu Cuenta Google > Seguridad > Contraseñas de aplicaciones.")
+            n_pass = st.text_input("Contraseña de Aplicación (16 letras)", value=smtp_pass_act, type="password", help="Generala en Cuenta Google > Seguridad > Contraseñas de aplicaciones.")
             if st.form_submit_button("Guardar Configuración"):
                 set_config("smtp_email", n_mail.strip())
                 set_config("smtp_password", n_pass.strip())
@@ -424,16 +423,16 @@ if u["rol"] == "profesor":
 
         tab_curso, tab_participantes, tab_calificaciones = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones"])
 
-        # --- 1. PESTAÑA CURSO (CON EDICIÓN DE UNIDADES) ---
+        # --- 1. PESTAÑA CURSO (GESTIÓN Y EDICIÓN INTEGRAL) ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
-                with st.popover("➕ Añadir Nueva Sección / Tema"):
+                with st.popover("➕ Añadir Nueva Sección / Unidad"):
                     with st.form("form_nueva_secc", clear_on_submit=True):
                         nom_secc = st.text_input("Nombre de la Sección (ej: Unidad 1)")
                         if st.form_submit_button("Crear Sección") and nom_secc:
                             orden_max = c.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM secciones WHERE catedra_id = ?", (cat_id,)).fetchone()[0]
-                            c.execute("INSERT INTO secciones (catedra_id, titulo, orden) VALUES (?, ?, ?)", (cat_id, nom_secc, orden_max))
+                            c.execute("INSERT INTO secciones (catedra_id, titulo, orden) VALUES (?, ?, ?)", (cat_id, nom_secc.strip(), orden_max))
                             conn.commit()
                             st.success("Sección creada.")
                             st.rerun()
@@ -476,29 +475,32 @@ if u["rol"] == "profesor":
                             c.execute("""
                                 INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo)
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (cat_id, sec_map[sec_elegida], tit_act, tipo_db, str(f_lim), dur_min, json_preguntas, desc_act, enlace_url))
+                            """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_preguntas, desc_act, enlace_url))
                             conn.commit()
                             st.success("Actividad publicada.")
                             st.rerun()
 
-            # Renderizado de Secciones con botones de EDITAR y BORRAR
-            df_secciones = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
+            # LISTA DE SECCIONES CON EDICIÓN COMPLETA (NOMBRE, ORDEN, ELIMINAR)
+            df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             if df_secciones.empty:
-                st.info("No hay secciones creadas en este curso. Usa el botón '➕ Añadir Nueva Sección / Tema' arriba.")
+                st.info("No hay secciones creadas en este curso. Usa el botón '➕ Añadir Nueva Sección / Unidad' arriba.")
             else:
                 for _, sec in df_secciones.iterrows():
-                    col_s_tit, col_s_edit, col_s_del = st.columns([5, 1, 1])
+                    st.divider()
+                    col_s_tit, col_s_edit, col_s_del = st.columns([5, 1.2, 1])
                     with col_s_tit:
-                        st.markdown(f"#### 📂 {sec['titulo']}")
+                        st.markdown(f"### 📂 **{sec['titulo']}**")
                     
                     with col_s_edit:
-                        with st.popover("✏️ Editar", key=f"pop_edit_{sec['id']}"):
+                        with st.popover("✏️ Modificar Sección", key=f"pop_edit_sec_{sec['id']}"):
                             with st.form(f"form_renombrar_{sec['id']}"):
-                                nuevo_nombre = st.text_input("Nuevo nombre:", value=sec['titulo'])
-                                if st.form_submit_button("Guardar") and nuevo_nombre:
-                                    c.execute("UPDATE secciones SET titulo = ? WHERE id = ?", (nuevo_nombre.strip(), sec['id']))
+                                st.markdown(f"##### Editar Sección #{sec['id']}")
+                                nuevo_nombre = st.text_input("Título de la Sección", value=sec['titulo'])
+                                nuevo_orden = st.number_input("Orden numérico", value=int(sec['orden']), min_value=1, step=1)
+                                if st.form_submit_button("Guardar Modificaciones") and nuevo_nombre:
+                                    c.execute("UPDATE secciones SET titulo = ?, orden = ? WHERE id = ?", (nuevo_nombre.strip(), nuevo_orden, sec['id']))
                                     conn.commit()
-                                    st.success("Sección actualizada.")
+                                    st.success("Sección modificada.")
                                     st.rerun()
 
                     with col_s_del:
@@ -508,14 +510,69 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
+                    # ACTIVIDADES DENTRO DE LA SECCIÓN (CON EDICIÓN Y BORRADO INDIVIDUAL)
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
-                        st.caption("No hay contenidos cargados en esta sección.")
+                        st.caption("No hay actividades cargadas en esta sección.")
                     else:
                         for _, a in acts.iterrows():
+                            col_act_info, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
+                            
                             ico = "⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else "🔗")
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
-                            st.markdown(f"> {ico} **{a['titulo']}** ({a['tipo']}){t_lbl} — *Vence: {a['fecha_limite']}*")
+                            
+                            with col_act_info:
+                                st.markdown(f"> {ico} **{a['titulo']}** ({a['tipo']}){t_lbl} — *Vence: {a['fecha_limite']}*")
+                                if a['descripcion']:
+                                    st.caption(f"&nbsp;&nbsp;&nbsp;&nbsp;📌 *Consigna:* {a['descripcion']}")
+                            
+                            with col_act_edit:
+                                with st.popover("✏️ Editar", key=f"pop_act_edit_{a['id']}"):
+                                    with st.form(f"form_edit_act_{a['id']}"):
+                                        st.markdown(f"##### Modificar Actividad: {a['titulo']}")
+                                        n_tit_act = st.text_input("Título", value=a['titulo'])
+                                        n_desc_act = st.text_area("Descripción / Consigna", value=a['descripcion'] if a['descripcion'] else "")
+                                        
+                                        # Fecha Límite
+                                        try:
+                                            fecha_actual = datetime.strptime(a['fecha_limite'], "%Y-%m-%d").date()
+                                        except Exception:
+                                            fecha_actual = date.today()
+                                        n_f_lim = st.date_input("Fecha Límite", value=fecha_actual)
+                                        
+                                        # Duración si es cuestionario
+                                        n_dur = a['duracion_minutos']
+                                        n_preg_json = a['preguntas_json']
+                                        if a['tipo'] == "Cuestionario":
+                                            n_dur = st.number_input("Duración (minutos):", min_value=1, max_value=180, value=int(a['duracion_minutos']))
+                                            st.markdown("**Editar preguntas (JSON):**")
+                                            n_preg_json = st.text_area("Preguntas", value=a['preguntas_json'] if a['preguntas_json'] else "[]")
+
+                                        n_enlace = st.text_input("Enlace URL / Archivo", value=a['enlace_archivo'] if a['enlace_archivo'] else "")
+
+                                        # Posibilidad de mover a otra sección
+                                        sec_opts = {r['titulo']: r['id'] for _, r in df_secciones.iterrows()}
+                                        sec_actual_nom = [k for k, v in sec_opts.items() if v == a['seccion_id']]
+                                        idx_default = list(sec_opts.keys()).index(sec_actual_nom[0]) if sec_actual_nom else 0
+                                        n_sec_elegida = st.selectbox("Mover a sección:", list(sec_opts.keys()), index=idx_default)
+
+                                        if st.form_submit_button("Guardar Cambios") and n_tit_act:
+                                            c.execute("""
+                                                UPDATE actividades 
+                                                SET seccion_id = ?, titulo = ?, descripcion = ?, fecha_limite = ?, duracion_minutos = ?, preguntas_json = ?, enlace_archivo = ?
+                                                WHERE id = ?
+                                            """, (sec_opts[n_sec_elegida], n_tit_act.strip(), n_desc_act, str(n_f_lim), n_dur, n_preg_json, n_enlace, a['id']))
+                                            conn.commit()
+                                            st.success("Actividad modificada exitosamente.")
+                                            st.rerun()
+
+                            with col_act_del:
+                                if st.button("🗑️", key=f"del_act_{a['id']}", help="Eliminar actividad"):
+                                    c.execute("DELETE FROM entregas WHERE actividad_id = ?", (a['id'],))
+                                    c.execute("DELETE FROM actividades WHERE id = ?", (a['id'],))
+                                    conn.commit()
+                                    st.success("Actividad eliminada.")
+                                    st.rerun()
 
         # --- 2. PESTAÑA PARTICIPANTES (CON ENVÍO DE EMAIL AL REGISTRAR) ---
         with tab_participantes:
