@@ -421,7 +421,7 @@ p, li {{ font-size: 14px; text-align: justify; }}
 </html>"""
     return html_pdf.encode('utf-8')
 
-# --- FUNCIONES DE EMAIL ROBUSTA (STARTTLS 587 Y SSL 465) ---
+# --- FUNCIONES DE EMAIL ROBUSTA ---
 def get_config(clave, default=""):
     r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
     return r[0] if r else default
@@ -443,7 +443,6 @@ def enviar_correo_smtp(destinatario, asunto, cuerpo):
     msg['Subject'] = asunto
     msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
 
-    # Intento 1: Puerto estándar 587 con STARTTLS
     try:
         server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
         server.ehlo()
@@ -454,7 +453,6 @@ def enviar_correo_smtp(destinatario, asunto, cuerpo):
         server.quit()
         return True, "Correo enviado exitosamente."
     except Exception as e1:
-        # Intento 2: Fallback a puerto 465 con SSL directo
         try:
             server_ssl = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
             server_ssl.login(remitente, smtp_pass)
@@ -501,7 +499,7 @@ def analizar_antifraude_ia(texto, api_key=""):
     
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
-        prompt = f"""Eres un auditor académico experto en detección de plagio e inteligencia artificial.
+        prompt = f"""Eres un auditor académico experto en detección de plagio y análisis sintáctico.
 Analiza este texto o extracto de trabajo entregado por un estudiante:
 \"\"\"{texto[:2000]}\"\"\"
 
@@ -533,10 +531,10 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
     pct_web = min(90, max(6, int((len(palabras) % 30) + 12 + coincidencias * 8)))
     
     if pct_ia >= 70 or pct_web >= 60:
-        dictamen = "Alta probabilidad de asistencia por IA y estructura sintética típica de modelos generativos."
+        dictamen = "Alta probabilidad de contenido asistido o generado mediante modelos computacionales."
         color = "#ef4444"
     elif pct_ia >= 40:
-        dictamen = "Sospecha moderada de uso de IA o paráfrasis automática."
+        dictamen = "Sospecha moderada de estructuración asistida o paráfrasis automática."
         color = "#f59e0b"
     else:
         dictamen = "Redacción original con patrones de escritura natural."
@@ -727,7 +725,7 @@ with col_h3:
     with c_ia_btn:
         if u["rol"] == "profesor":
             with st.popover("🤖 Asistente IA"):
-                st.markdown("#### 🤖 **Asistente Pedagógico IA**")
+                st.markdown("#### 🤖 **Asistente Pedagógico**")
                 st.caption("Planificá clases, trabajos prácticos y exámenes con descarga en Word y PDF.")
                 
                 tipo_ia_sel = st.selectbox("¿Qué deseas generar?:", [
@@ -741,7 +739,7 @@ with col_h3:
                 n_ia = st.text_input("Nivel / Curso:", placeholder="Ej: 5° Año - Secundaria", key="nivel_flotante_ia")
                 e_ia = st.text_area("Detalles / Enfoque pedagógico:", placeholder="Ej: Casos de estudio, jurisprudencia relevante, debate grupal...", key="enfoque_flotante_ia")
                 
-                if st.button("✨ Generar Documento con IA", key="btn_gen_flotante"):
+                if st.button("✨ Generar Documento", key="btn_gen_flotante"):
                     if t_ia:
                         with st.spinner("Diseñando propuesta educativa detallada..."):
                             ck = get_config("gemini_api_key", "")
@@ -847,9 +845,9 @@ if u["rol"] == "profesor":
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
         
-        with st.sidebar.expander("🤖 Configuración de Asistente IA"):
+        with st.sidebar.expander("🤖 Configuración del Asistente"):
             gemini_act = get_config("gemini_api_key", "")
-            gemini_in = st.text_input("Clave de Asistente IA:", value=gemini_act, type="password")
+            gemini_in = st.text_input("Clave de Asistente:", value=gemini_act, type="password")
             if st.button("Guardar Clave"):
                 set_config("gemini_api_key", gemini_in.strip())
                 st.success("Clave guardada exitosamente.")
@@ -1612,8 +1610,8 @@ if u["rol"] == "profesor":
 
                             st.markdown(f"""
                             <div class='ai-detector-box' style='border-left: 5px solid {reporte['color']};'>
-                                <h5 style='margin:0 0 6px 0; color:#1e293b;'>📊 Auditoría Automática de Autenticidad y Similitud</h5>
-                                • <b>Probabilidad de Contenido generado por IA:</b> <span style='color:{reporte['color']}; font-weight:bold; font-size:15px;'>{reporte['pct_ia']}%</span><br>
+                                <h5 style='margin:0 0 6px 0; color:#1e293b;'>📊 Auditoría de Autenticidad y Similitud Académica</h5>
+                                • <b>Probabilidad de Contenido asistido:</b> <span style='color:{reporte['color']}; font-weight:bold; font-size:15px;'>{reporte['pct_ia']}%</span><br>
                                 • <b>Índice de Similitud con Fuentes Web:</b> <b>{reporte['pct_web']}%</b><br>
                                 • <b>Dictamen:</b> {reporte['dictamen']}
                             </div>
