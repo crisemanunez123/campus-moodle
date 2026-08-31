@@ -49,7 +49,6 @@ st.markdown("""
         margin-top: 2px;
     }
     
-    /* Botones con fondo azul nítido y texto blanco forzado */
     .stButton > button {
         background-color: #2563eb !important;
         color: #ffffff !important;
@@ -68,7 +67,6 @@ st.markdown("""
         box-shadow: 0 4px 10px rgba(29, 78, 216, 0.3) !important;
     }
     
-    /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
@@ -285,14 +283,6 @@ CREATE TABLE IF NOT EXISTS mensajes_privados (
 )
 """)
 
-try:
-    cols_msg = [col[1] for col in c.execute("PRAGMA table_info(mensajes_privados)").fetchall()]
-    if "leido" not in cols_msg:
-        c.execute("ALTER TABLE mensajes_privados ADD COLUMN leido INTEGER DEFAULT 0")
-        conn.commit()
-except Exception:
-    pass
-
 c.execute("""
 CREATE TABLE IF NOT EXISTS calificaciones_periodos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -316,6 +306,14 @@ CREATE TABLE IF NOT EXISTS configuracion (
 )
 """)
 conn.commit()
+
+# --- USUARIOS INICIALES (ADMIN GENERAL Y PROFESOR/ALUMNO) ---
+if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
+    # Administrador General (Cristian Nuñez)
+    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin')")
+    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('profesor', '1234', 'Prof. Cristian Nuñez', 'prof@educacion.edu', 'profesor')")
+    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('alumno1', '1234', 'Juan Pérez', 'juan@gmail.com', 'estudiante')")
+    conn.commit()
 
 # --- FUNCIONES DE DIBUJO DE TORTA (SVG NATIVO) ---
 def render_pie_chart_svg(data_dict):
@@ -674,12 +672,6 @@ def renderizar_recurso_multimedia(enlace):
     else:
         st.markdown(f"🔗 **Enlace / Documento:** [{enlace_limpio}]({enlace_limpio})")
 
-# --- USUARIOS INICIALES ---
-if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('profesor', '1234', 'Prof. Cristian Nuñez', 'prof@educacion.edu', 'profesor')")
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('alumno1', '1234', 'Juan Pérez', 'juan@gmail.com', 'estudiante')")
-    conn.commit()
-
 # --- SESIÓN ---
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -722,7 +714,7 @@ if st.session_state.user is None:
                     st.success("Acceso concedido.")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas (Profesor inicial: `profesor`/`1234`)")
+                    st.error("Credenciales incorrectas (Admin inicial: `cristian`/`1234`)")
     st.stop()
 
 # --- ENCABEZADO GLOBAL CON PERFIL DE USUARIO Y ASISTENTE IA INTEGRADO ---
@@ -740,7 +732,7 @@ with col_h3:
     c_ia_btn, col_u_info, col_u_menu = st.columns([2.2, 2.8, 2])
     
     with c_ia_btn:
-        if u["rol"] == "profesor":
+        if u["rol"] in ["profesor", "admin"]:
             with st.popover("🤖 Asistente IA"):
                 st.markdown("#### 🤖 **Asistente Pedagógico**")
                 st.caption("Planificá clases, trabajos prácticos y exámenes con descarga en Word y PDF.")
@@ -853,11 +845,85 @@ with col_h3:
 st.divider()
 
 # ==============================================================================
+# 👑 VISTA ADMINISTRADOR GENERAL (CRISTIAN NUÑEZ)
+# ==============================================================================
+if u["rol"] == "admin":
+    st.markdown("## **👑 Panel de Administración General (Gestión de Profesores y Cursos)**")
+    
+    tab_adm_profes, tab_adm_cursos = st.tabs(["👨‍🏫 Gestión de Profesores", "🏛️ Todos los Cursos"])
+    
+    with tab_adm_profes:
+        st.markdown("### ➕ Dar de Alta Nuevo Profesor")
+        with st.form("form_alta_profesor_admin", clear_on_submit=True):
+            col_ap1, col_ap2 = st.columns(2)
+            with col_ap1:
+                nom_prof = st.text_input("Nombre y Apellido del Profesor *")
+                mail_prof = st.text_input("Email Docente *")
+            with col_ap2:
+                usr_prof = st.text_input("Usuario de Acceso *")
+                pwd_prof = st.text_input("Contraseña Temporal *", value="1234")
+            
+            if st.form_submit_button("Registrar y Habilitar Profesor"):
+                if nom_prof.strip() and mail_prof.strip() and usr_prof.strip():
+                    try:
+                        c.execute("""
+                            INSERT INTO usuarios (username, password, nombre, email, rol)
+                            VALUES (?, ?, ?, ?, 'profesor')
+                        """, (usr_prof.strip(), pwd_prof.strip(), nom_prof.strip(), mail_prof.strip()))
+                        conn.commit()
+                        st.success(f"Profesor/a {nom_prof} registrado/a exitosamente.")
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("El nombre de usuario o email ya se encuentra registrado.")
+                else:
+                    st.error("Por favor complete todos los campos obligatorios.")
+
+        st.divider()
+        st.markdown("### 📋 **Lista de Profesores Registrados en el Sistema**")
+        df_profesores = pd.read_sql("SELECT id, nombre, email, username FROM usuarios WHERE rol = 'profesor'", conn)
+        if df_profesores.empty:
+            st.info("No hay profesores registrados.")
+        else:
+            for _, prof in df_profesores.iterrows():
+                col_p1, col_p2 = st.columns([5, 1])
+                col_p1.markdown(f"👨‍🏫 **{prof['nombre']}** &nbsp;|&nbsp; 📧 `{prof['email']}` &nbsp;|&nbsp; 👤 Usuario: `{prof['username']}`")
+                with col_p2:
+                    if st.button("🗑️ Eliminar", key=f"del_prof_{prof['id']}"):
+                        c.execute("DELETE FROM usuarios WHERE id = ?", (prof['id'],))
+                        conn.commit()
+                        st.success("Profesor eliminado.")
+                        st.rerun()
+
+    with tab_adm_cursos:
+        st.markdown("### 🏛️ **Cursos Creados en la Plataforma**")
+        df_todos_cursos = pd.read_sql("""
+            SELECT c.id, c.nombre, c.curso_anio, c.escuela, u.nombre as profesor 
+            FROM catedras c 
+            JOIN usuarios u ON c.profesor_id = u.id
+        """, conn)
+
+        if df_todos_cursos.empty:
+            st.info("No hay cursos creados en el sistema.")
+        else:
+            for _, cur in df_todos_cursos.iterrows():
+                col_c1, col_c2 = st.columns([5, 1])
+                col_c1.markdown(f"📚 **{cur['nombre']}** ({cur['curso_anio']} - {cur['escuela']}) — *Docente: {cur['profesor']}*")
+                with col_c2:
+                    if st.button("🗑️ Borrar", key=f"del_cur_adm_{cur['id']}"):
+                        c.execute("DELETE FROM actividades WHERE catedra_id = ?", (cur['id'],))
+                        c.execute("DELETE FROM secciones WHERE catedra_id = ?", (cur['id'],))
+                        c.execute("DELETE FROM matriculas WHERE catedra_id = ?", (cur['id'],))
+                        c.execute("DELETE FROM catedras WHERE id = ?", (cur['id'],))
+                        conn.commit()
+                        st.success("Curso eliminado correctamente.")
+                        st.rerun()
+
+# ==============================================================================
 # 👨‍🏫 VISTA PROFESOR / DOCENTE
 # ==============================================================================
-if u["rol"] == "profesor":
+elif u["rol"] == "profesor":
 
-    # DASHBOARD DE CURSOS
+    # DASHBOARD DE CURSOS ( CON OPCIÓN DE BORRAR CURSO )
     if st.session_state.materia_seleccionada_id is None:
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
@@ -890,22 +956,6 @@ if u["rol"] == "profesor":
                         st.success("¡Correo de prueba enviado con éxito!")
                     else:
                         st.error(f"Fallo al enviar: {msg_t}")
-
-        with st.sidebar.expander("👨‍🏫 Crear Nuevo Usuario Profesor"):
-            with st.form("form_crear_nuevo_profe", clear_on_submit=True):
-                nom_p = st.text_input("Nombre y Apellido del Profesor")
-                mail_p = st.text_input("Email Docente")
-                usr_p = st.text_input("Usuario Docente")
-                pwd_p = st.text_input("Contraseña", value="1234")
-                if st.form_submit_button("Registrar Profesor"):
-                    if nom_p and mail_p and usr_p and pwd_p:
-                        try:
-                            c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'profesor')",
-                                      (usr_p.strip(), pwd_p.strip(), nom_p.strip(), mail_p.strip()))
-                            conn.commit()
-                            st.success(f"Profesor {nom_p} registrado con éxito.")
-                        except sqlite3.IntegrityError:
-                            st.error("El nombre de usuario o email ya existe.")
 
         st.markdown("## **Mis Cursos y Materias**")
         col_btn1, col_btn2 = st.columns([1, 4])
@@ -952,9 +1002,21 @@ if u["rol"] == "profesor":
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    if st.button(f"Entrar al curso ➜", key=f"entrar_{row['id']}"):
-                        st.session_state.materia_seleccionada_id = row['id']
-                        st.rerun()
+                    
+                    c_card_btn1, c_card_btn2 = st.columns([2, 1])
+                    with c_card_btn1:
+                        if st.button(f"Entrar ➜", key=f"entrar_{row['id']}"):
+                            st.session_state.materia_seleccionada_id = row['id']
+                            st.rerun()
+                    with c_card_btn2:
+                        if st.button(f"🗑️ Borrar", key=f"del_curso_{row['id']}"):
+                            c.execute("DELETE FROM actividades WHERE catedra_id = ?", (row['id'],))
+                            c.execute("DELETE FROM secciones WHERE catedra_id = ?", (row['id'],))
+                            c.execute("DELETE FROM matriculas WHERE catedra_id = ?", (row['id'],))
+                            c.execute("DELETE FROM catedras WHERE id = ?", (row['id'],))
+                            conn.commit()
+                            st.success("Curso eliminado.")
+                            st.rerun()
 
     # DENTRO DE UNA MATERIA
     else:
@@ -975,7 +1037,7 @@ if u["rol"] == "profesor":
             "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
         ])
 
-        # --- 1. PESTAÑA CURSO (CON CONSTRUCTOR MULTIPREGUNTA CORREGIDO) ---
+        # --- 1. PESTAÑA CURSO ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -995,17 +1057,17 @@ if u["rol"] == "profesor":
                     st.warning("Primero creá al menos una sección arriba para añadir actividades.")
                 else:
                     tipo_modulo = st.selectbox("Tipo de recurso:", [
-                        "⏱️ Cuestionario / Examen Dinámico por Tiempo",
                         "📚 Bibliografía (Material de lectura / Video / Enlace)",
                         "💬 Foro (Debate e Interacción)",
+                        "⏱️ Cuestionario / Examen Dinámico por Tiempo",
                         "📝 Tarea (Entrega de Archivo/Texto)"
                     ])
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / examen", placeholder="Ej: Examen Parcial de Derecho / Trabajo Práctico")
-                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los estudiantes...")
-                    f_lim = st.date_input("Fecha Límite", min_value=date.today())
+                    tit_act = st.text_input("Título de la actividad / bibliografía / foro / examen", placeholder="Ej: Material de lectura: Ley 24.521 / Examen Parcial")
+                    desc_act = st.text_area("Descripción / Consigna / Referencia bibliográfica", placeholder="Detalles, páginas a leer o instrucciones...")
+                    f_lim = st.date_input("Fecha Límite / Fecha de clase", min_value=date.today())
 
                     es_obligatorio_val = 0
                     if "Bibliografía" in tipo_modulo:
@@ -1021,7 +1083,6 @@ if u["rol"] == "profesor":
                         st.markdown("---")
                         st.markdown("### 🛠️ **Configuración del Examen por Tiempo**")
                         dur_min = st.number_input("⏱️ Tiempo límite para responder (en minutos):", min_value=1, max_value=240, value=15)
-                        
                         cant_pregs = st.number_input("Cantidad de preguntas / ítems a configurar:", min_value=1, max_value=25, value=2)
                         
                         for i in range(int(cant_pregs)):
@@ -1083,7 +1144,7 @@ if u["rol"] == "profesor":
 
                     if st.button("🚀 Publicar Recurso en el Curso"):
                         if not tit_act.strip():
-                            st.error("Por favor completá el título de la actividad.")
+                            st.error("Por favor completá el título de la actividad o bibliografía.")
                         else:
                             if "Bibliografía" in tipo_modulo:
                                 tipo_db = "Bibliografía"
