@@ -110,6 +110,8 @@ st.markdown("""
         margin-bottom: 12px;
         box-shadow: 0 1px 3px rgba(0,0,0,0.04);
     }
+    .msg-box-in { background-color: #f1f5f9; border-left: 4px solid #64748b; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
+    .msg-box-out { background-color: #e0f2fe; border-left: 4px solid #0284c7; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -132,12 +134,25 @@ c.execute("""
 CREATE TABLE IF NOT EXISTS catedras (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     nombre TEXT,
-    codigo TEXT UNIQUE,
-    categoria TEXT DEFAULT 'Categoría 1',
+    codigo TEXT,
+    categoria TEXT DEFAULT 'General',
+    curso_anio TEXT,
+    escuela TEXT,
     profesor_id INTEGER,
     FOREIGN KEY(profesor_id) REFERENCES usuarios(id)
 )
 """)
+
+# Migración para curso_anio y escuela
+try:
+    cols_cat = [col[1] for col in c.execute("PRAGMA table_info(catedras)").fetchall()]
+    if "curso_anio" not in cols_cat:
+        c.execute("ALTER TABLE catedras ADD COLUMN curso_anio TEXT")
+    if "escuela" not in cols_cat:
+        c.execute("ALTER TABLE catedras ADD COLUMN escuela TEXT")
+    conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS secciones (
@@ -167,7 +182,6 @@ CREATE TABLE IF NOT EXISTS actividades (
 )
 """)
 
-# Migración para campo obligatorio
 try:
     cols_act = [col[1] for col in c.execute("PRAGMA table_info(actividades)").fetchall()]
     if "es_obligatorio" not in cols_act:
@@ -226,6 +240,20 @@ CREATE TABLE IF NOT EXISTS foro_mensajes (
     fecha TEXT,
     FOREIGN KEY(actividad_id) REFERENCES actividades(id),
     FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
+)
+""")
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS mensajes_privados (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    emisor_id INTEGER,
+    receptor_id INTEGER,
+    catedra_id INTEGER,
+    mensaje TEXT,
+    fecha TEXT,
+    FOREIGN KEY(emisor_id) REFERENCES usuarios(id),
+    FOREIGN KEY(receptor_id) REFERENCES usuarios(id),
+    FOREIGN KEY(catedra_id) REFERENCES catedras(id)
 )
 """)
 
@@ -433,40 +461,48 @@ if u["rol"] == "profesor":
                         except sqlite3.IntegrityError:
                             st.error("El nombre de usuario o email ya existe.")
 
-        st.markdown("## **Vista General de Cursos**")
+        st.markdown("## **Mis Cursos y Materias**")
         col_btn1, col_btn2 = st.columns([1, 4])
         with col_btn1:
-            with st.popover("➕ Crear Curso"):
-                with st.form("form_crear_materia", clear_on_submit=True):
-                    nom_mat = st.text_input("Nombre del Curso")
-                    cod_mat = st.text_input("Código de Comisión (ej: LSO-4TO)")
-                    cat_mat = st.text_input("Categoría", value="Categoría 1")
-                    if st.form_submit_button("Guardar Curso") and nom_mat and cod_mat:
-                        try:
-                            c.execute("INSERT INTO catedras (nombre, codigo, categoria, profesor_id) VALUES (?, ?, ?, ?)",
-                                      (nom_mat, cod_mat, cat_mat, u["id"]))
+            with st.popover("➕ Crear Curso / Materia"):
+                with st.form("form_crear_materia_simple", clear_on_submit=True):
+                    st.markdown("##### Nuevo Curso")
+                    nom_mat = st.text_input("Nombre de la Materia / Curso *", placeholder="Ej: Política y Ciudadanía")
+                    curso_anio = st.text_input("Curso / Año / División (Opcional)", placeholder="Ej: 5° 2da / 3er Año")
+                    escuela = st.text_input("Escuela / Institución (Opcional)", placeholder="Ej: Escuela Secundaria N° 1")
+                    
+                    if st.form_submit_button("Crear Curso"):
+                        if nom_mat.strip():
+                            cod_auto = f"C-{int(time.time())}"
+                            c.execute("""
+                                INSERT INTO catedras (nombre, codigo, categoria, curso_anio, escuela, profesor_id)
+                                VALUES (?, ?, 'General', ?, ?, ?)
+                            """, (nom_mat.strip(), cod_auto, curso_anio.strip(), escuela.strip(), u["id"]))
                             conn.commit()
-                            st.success("Materia creada.")
+                            st.success("Curso creado exitosamente.")
                             st.rerun()
-                        except sqlite3.IntegrityError:
-                            st.error("Ya existe una materia con ese código.")
+                        else:
+                            st.error("El nombre de la materia es obligatorio.")
 
-        df_materias = pd.read_sql("SELECT id, nombre, codigo, categoria FROM catedras WHERE profesor_id = ?", conn, params=(u["id"],))
+        df_materias = pd.read_sql("SELECT id, nombre, curso_anio, escuela FROM catedras WHERE profesor_id = ?", conn, params=(u["id"],))
 
         if df_materias.empty:
-            st.info("Aún no tienes cursos creados. Pulsa '➕ Crear Curso' para comenzar.")
+            st.info("Aún no tienes cursos creados. Pulsa '➕ Crear Curso / Materia' para comenzar.")
         else:
             cols = st.columns(3)
             banners = ["card-banner-1", "card-banner-2", "card-banner-3", "card-banner-4"]
             for idx, row in df_materias.iterrows():
                 banner = banners[idx % len(banners)]
+                detalle_curso = f"{row['curso_anio']} • " if row['curso_anio'] else ""
+                detalle_escuela = f"{row['escuela']}" if row['escuela'] else "Institución"
+                
                 with cols[idx % 3]:
                     st.markdown(f"""
                     <div class='course-card'>
                         <div class='{banner}'></div>
                         <div class='course-card-body'>
                             <div class='course-title'>{row['nombre']}</div>
-                            <div class='course-cat'>{row['categoria']} • {row['codigo']}</div>
+                            <div class='course-cat'>{detalle_curso}{detalle_escuela}</div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
@@ -477,18 +513,21 @@ if u["rol"] == "profesor":
     # DENTRO DE UNA MATERIA (BARRA LATERAL OCULTA)
     else:
         cat_id = st.session_state.materia_seleccionada_id
-        res_cat = c.execute("SELECT nombre, codigo FROM catedras WHERE id = ?", (cat_id,)).fetchone()
+        res_cat = c.execute("SELECT nombre, curso_anio, escuela FROM catedras WHERE id = ?", (cat_id,)).fetchone()
         nombre_materia = res_cat[0]
+        sub_info = f" — {res_cat[1]} ({res_cat[2]})" if res_cat[1] or res_cat[2] else ""
 
         col_top_mat1, col_top_mat2 = st.columns([5, 1])
         with col_top_mat1:
-            st.subheader(f"🏛️ {nombre_materia}")
+            st.subheader(f"🏛️ {nombre_materia}{sub_info}")
         with col_top_mat2:
             if st.button("⬅️ Volver a mis Cursos"):
                 st.session_state.materia_seleccionada_id = None
                 st.rerun()
 
-        tab_curso, tab_participantes, tab_calificaciones, tab_asistencia = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia"])
+        tab_curso, tab_participantes, tab_calificaciones, tab_asistencia, tab_mensajes = st.tabs([
+            "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
+        ])
 
         # --- 1. PESTAÑA CURSO ---
         with tab_curso:
@@ -533,7 +572,6 @@ if u["rol"] == "profesor":
                         st.markdown("---")
                         st.markdown("### 🛠️ **Configuración del Examen por Tiempo**")
                         dur_min = st.number_input("⏱️ Tiempo límite para responder (en minutos):", min_value=1, max_value=240, value=15)
-                        
                         cant_pregs = st.number_input("Cantidad de preguntas / ítems a configurar:", min_value=1, max_value=25, value=2)
                         
                         for i in range(int(cant_pregs)):
@@ -759,7 +797,7 @@ if u["rol"] == "profesor":
                                     st.success("Actividad eliminada.")
                                     st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES (CON EDICIÓN Y BORRADO DE ALUMNOS) ---
+        # --- 2. PESTAÑA PARTICIPANTES (CON MENSAJE PRIVADO, EDICIÓN Y BAJA) ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -819,10 +857,23 @@ if u["rol"] == "profesor":
                 st.info("No hay alumnos matriculados en esta cátedra.")
             else:
                 for _, al_row in df_matriculados.iterrows():
-                    col_al_info, col_al_edit, col_al_del = st.columns([5, 1.2, 1.2])
+                    col_al_info, col_al_msg, col_al_edit, col_al_del = st.columns([4.5, 1.3, 1.1, 1.1])
                     
                     with col_al_info:
                         st.markdown(f"👤 **{al_row['nombre']}** &nbsp;|&nbsp; 📧 `{al_row['email']}` &nbsp;|&nbsp; 🔑 Usuario: `{al_row['username']}`")
+
+                    with col_al_msg:
+                        with st.popover("💬 Mensaje", key=f"pop_msg_direct_{al_row['user_id']}"):
+                            with st.form(f"form_msg_direct_{al_row['user_id']}"):
+                                st.markdown(f"##### Mensaje privado para {al_row['nombre']}")
+                                txt_direct = st.text_area("Escribir mensaje:")
+                                if st.form_submit_button("Enviar Mensaje") and txt_direct.strip():
+                                    c.execute("""
+                                        INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha)
+                                        VALUES (?, ?, ?, ?, ?)
+                                    """, (u["id"], al_row["user_id"], cat_id, txt_direct.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                    conn.commit()
+                                    st.success("Mensaje enviado correctamente.")
 
                     with col_al_edit:
                         with st.popover("✏️ Modificar", key=f"pop_edit_al_{al_row['user_id']}"):
@@ -844,13 +895,13 @@ if u["rol"] == "profesor":
                                         st.rerun()
 
                     with col_al_del:
-                        if st.button("🗑️ Dar de Baja", key=f"del_mat_{al_row['user_id']}", help="Desmatricular de la materia"):
+                        if st.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}", help="Desmatricular de la materia"):
                             c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
                             conn.commit()
                             st.success(f"{al_row['nombre']} desmatriculado/a.")
                             st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES (INCLUYE FOROS OBLIGATORIOS) ---
+        # --- 3. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
             st.markdown("### **Libro Central de Calificaciones**")
             
@@ -860,7 +911,6 @@ if u["rol"] == "profesor":
                 WHERE m.catedra_id = ? ORDER BY u.nombre ASC
             """, conn, params=(cat_id,))
 
-            # Tareas, Cuestionarios y Foros marcados como obligatorios
             acts_curso = pd.read_sql("""
                 SELECT id, titulo, tipo FROM actividades 
                 WHERE catedra_id = ? AND (tipo IN ('Tarea', 'Cuestionario') OR (tipo = 'Foro' AND es_obligatorio = 1))
@@ -908,7 +958,6 @@ if u["rol"] == "profesor":
             st.divider()
             st.markdown("### **Revisión Detallada, Calificación de Tareas y Foros**")
             
-            # Formulario para calificar foros obligatorios por alumno
             foros_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo = 'Foro' AND es_obligatorio = 1", conn, params=(cat_id,))
             if not foros_eval.empty and not alumnos_curso.empty:
                 st.markdown("#### 💬 **Calificar Participación en Foros Obligatorios:**")
@@ -919,8 +968,6 @@ if u["rol"] == "profesor":
                             nota_f_act = c.execute("SELECT nota, devolucion FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (f_eval['id'], al_f['id'])).fetchone()
                             
                             c_f1.write(f"👤 **{al_f['nombre']}**")
-                            
-                            # Cantidad de mensajes que escribió el alumno en este foro
                             mensajes_al_cant = c.execute("SELECT COUNT(*) FROM foro_mensajes WHERE actividad_id = ? AND usuario_id = ?", (f_eval['id'], al_f['id'])).fetchone()[0]
                             c_f2.caption(f"Aportes realizados: {mensajes_al_cant}")
                             
@@ -940,7 +987,6 @@ if u["rol"] == "profesor":
                                             st.success("Nota de foro guardada.")
                                             st.rerun()
 
-            # Entregas de Tareas y Exámenes
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
                        e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega
@@ -1118,6 +1164,52 @@ if u["rol"] == "profesor":
                 df_asist_resumen = pd.DataFrame(resumen_asist)
                 st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
 
+        # --- 5. PESTAÑA MENSAJES PRIVADOS ---
+        with tab_mensajes:
+            st.markdown("### ✉️ **Mensajería Privada con Estudiantes**")
+            
+            if alumnos_curso.empty:
+                st.info("No hay alumnos matriculados en esta materia.")
+            else:
+                map_al_msg = {f"{r['nombre']} ({r['email']})": r['id'] for _, r in alumnos_curso.iterrows()}
+                sel_al_chat = st.selectbox("Seleccionar estudiante para ver historial o escribirle:", list(map_al_msg.keys()))
+                al_chat_id = map_al_msg[sel_al_chat]
+
+                st.markdown("#### **Historial de Conversación:**")
+                mensajes_priv = pd.read_sql("""
+                    SELECT m.id, m.mensaje, m.fecha, m.emisor_id, u.nombre as emisor_nombre, u.rol as emisor_rol
+                    FROM mensajes_privados m
+                    JOIN usuarios u ON m.emisor_id = u.id
+                    WHERE m.catedra_id = ? AND ((m.emisor_id = ? AND m.receptor_id = ?) OR (m.emisor_id = ? AND m.receptor_id = ?))
+                    ORDER BY m.id ASC
+                """, conn, params=(cat_id, u["id"], al_chat_id, al_chat_id, u["id"]))
+
+                if mensajes_priv.empty:
+                    st.caption("No hay mensajes previos en esta conversación.")
+                else:
+                    for _, msg_p in mensajes_priv.iterrows():
+                        es_mio = (msg_p['emisor_id'] == u['id'])
+                        box_class = "msg-box-out" if es_mio else "msg-box-in"
+                        emisor_tag = "Yo (Profesor)" if es_mio else f"👤 {msg_p['emisor_nombre']}"
+                        
+                        st.markdown(f"""
+                        <div class='{box_class}'>
+                            <b>{emisor_tag}</b> &nbsp;<small style='color:#64748b;'>{msg_p['fecha']}</small><br>
+                            <p style='margin-top:4px; margin-bottom:0px;'>{msg_p['mensaje']}</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                with st.form(f"form_enviar_msg_priv_{al_chat_id}", clear_on_submit=True):
+                    txt_nuevo_msg = st.text_area("Escribir mensaje privado para el estudiante:")
+                    if st.form_submit_button("Enviar Mensaje Privado") and txt_nuevo_msg.strip():
+                        c.execute("""
+                            INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha)
+                            VALUES (?, ?, ?, ?, ?)
+                        """, (u["id"], al_chat_id, cat_id, txt_nuevo_msg.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                        conn.commit()
+                        st.success("Mensaje enviado.")
+                        st.rerun()
+
 # ==============================================================================
 # 🎓 VISTA ESTUDIANTE
 # ==============================================================================
@@ -1125,8 +1217,10 @@ else:
     st.markdown("## **Mis Cursos**")
     
     df_mis_cursos = pd.read_sql("""
-        SELECT c.id, c.nombre, c.codigo, c.categoria 
-        FROM catedras c JOIN matriculas m ON c.id = m.catedra_id 
+        SELECT c.id, c.nombre, c.curso_anio, c.escuela, c.profesor_id, u.nombre as profesor_nombre 
+        FROM catedras c 
+        JOIN matriculas m ON c.id = m.catedra_id 
+        JOIN usuarios u ON c.profesor_id = u.id
         WHERE m.estudiante_id = ?
     """, conn, params=(u["id"],))
 
@@ -1134,11 +1228,16 @@ else:
         st.warning("No estás matriculado en ninguna materia aún.")
         st.stop()
 
-    mat_map = {f"{r['nombre']} ({r['codigo']})": r['id'] for _, r in df_mis_cursos.iterrows()}
+    mat_map = {f"{r['nombre']} ({r['curso_anio']} - {r['escuela']})": r for _, r in df_mis_cursos.iterrows()}
     sel_mat_al = st.selectbox("Seleccionar Curso:", list(mat_map.keys()))
-    materia_id = mat_map[sel_mat_al]
+    materia_row = mat_map[sel_mat_al]
+    materia_id = materia_row["id"]
+    profesor_id_materia = materia_row["profesor_id"]
+    profesor_nom_materia = materia_row["profesor_nombre"]
 
-    tab_al_curso, tab_al_notas, tab_al_asist = st.tabs(["📘 Curso y Evaluaciones", "📊 Mis Calificaciones", "📋 Mi Asistencia"])
+    tab_al_curso, tab_al_notas, tab_al_asist, tab_al_chat = st.tabs([
+        "📘 Curso y Evaluaciones", "📊 Mis Calificaciones", "📋 Mi Asistencia", "✉️ Mensajes al Profesor"
+    ])
 
     with tab_al_curso:
         df_sec_al = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(materia_id,))
@@ -1340,3 +1439,40 @@ else:
             c3.metric("% Asistencia", f"{porcentaje}%")
             
             st.dataframe(df_mis_asist, use_container_width=True, hide_index=True)
+
+    with tab_al_chat:
+        st.markdown(f"### ✉️ **Mensajes Privados con el Docente: {profesor_nom_materia}**")
+        
+        mensajes_priv_al = pd.read_sql("""
+            SELECT m.id, m.mensaje, m.fecha, m.emisor_id, u.nombre as emisor_nombre, u.rol as emisor_rol
+            FROM mensajes_privados m
+            JOIN usuarios u ON m.emisor_id = u.id
+            WHERE m.catedra_id = ? AND ((m.emisor_id = ? AND m.receptor_id = ?) OR (m.emisor_id = ? AND m.receptor_id = ?))
+            ORDER BY m.id ASC
+        """, conn, params=(materia_id, u["id"], profesor_id_materia, profesor_id_materia, u["id"]))
+
+        if mensajes_priv_al.empty:
+            st.caption("No tienes mensajes en esta materia con el profesor.")
+        else:
+            for _, msg_p in mensajes_priv_al.iterrows():
+                es_mio = (msg_p['emisor_id'] == u['id'])
+                box_class = "msg-box-out" if es_mio else "msg-box-in"
+                emisor_tag = "Yo (Estudiante)" if es_mio else f"👨‍🏫 {msg_p['emisor_nombre']}"
+                
+                st.markdown(f"""
+                <div class='{box_class}'>
+                    <b>{emisor_tag}</b> &nbsp;<small style='color:#64748b;'>{msg_p['fecha']}</small><br>
+                    <p style='margin-top:4px; margin-bottom:0px;'>{msg_p['mensaje']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with st.form("form_enviar_msg_profesor", clear_on_submit=True):
+            txt_nuevo_msg_al = st.text_area("Escribir consulta o mensaje al docente:")
+            if st.form_submit_button("Enviar Mensaje al Docente") and txt_nuevo_msg_al.strip():
+                c.execute("""
+                    INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (u["id"], profesor_id_materia, materia_id, txt_nuevo_msg_al.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                conn.commit()
+                st.success("Mensaje enviado al docente.")
+                st.rerun()
