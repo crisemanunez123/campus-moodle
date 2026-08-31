@@ -152,7 +152,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ROBUSTA ---
+# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ---
 conn = sqlite3.connect("campus_moodle.db", check_same_thread=False)
 c = conn.cursor()
 
@@ -171,7 +171,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
-# Auto-migración segura de columnas en usuarios
 try:
     cols_usr = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
     if "dni" not in cols_usr:
@@ -180,8 +179,6 @@ try:
         c.execute("ALTER TABLE usuarios ADD COLUMN domicilio TEXT DEFAULT ''")
     if "telefono" not in cols_usr:
         c.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT DEFAULT ''")
-    if "rol" not in cols_usr:
-        c.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT DEFAULT 'estudiante'")
     conn.commit()
 except Exception:
     pass
@@ -348,20 +345,17 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- ASEGURAR USUARIO ADMINISTRADOR GENERAL ('cristian') ---
-try:
-    admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
-    if not admin_check:
-        c.execute("""
-            INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
-            VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
-        """)
-        conn.commit()
-    else:
-        c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
-        conn.commit()
-except Exception:
-    pass
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
+admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
+if not admin_check:
+    c.execute("""
+        INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
+        VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
+    """)
+    conn.commit()
+else:
+    c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
+    conn.commit()
 
 # --- FUNCIONES AUXILIARES ---
 def get_config(clave, default=""):
@@ -555,7 +549,7 @@ def render_pie_chart_svg(data_dict):
         legend_html += f"<div style='display:flex; align-items:center; margin-bottom:4px;'><span style='display:inline-block; width:12px; height:12px; background-color:{color}; border-radius:3px; margin-right:8px;'></span><b>{label}:</b>&nbsp;{val} ({pct:.1f}%)</div>"
         
     legend_html += "</div>"
-    return f"""<div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'><svg width='180' height='180' viewBox='0 0 200 200'>{''.join(slices)}</svg>#{legend_html}</div>"""
+    return f"""<div style='display:flex; flex-direction:column; align-items:center; background:#ffffff; padding:16px; border-radius:10px; border:1px solid #e2e8f0;'><svg width='180' height='180' viewBox='0 0 200 200'>{''.join(slices)}</svg>{legend_html}</div>"""
 
 def es_enlace_video(url):
     if not url:
@@ -934,7 +928,7 @@ elif u["rol"] == "profesor":
 
                         if "Examen" in tipo_modulo:
                             st.markdown("---")
-                            st.markdown("### 🛠️ **Configuración del Examen por Tiempo**")
+                            st.markdown("### 🛠️ **Configuración del Examen por Tiempo y Porcentajes**")
                             dur_min = st.number_input("⏱️ Tiempo límite (minutos):", min_value=1, max_value=240, value=15)
                             cant_pregs = st.number_input("Cantidad de preguntas:", min_value=1, max_value=25, value=2)
                             
@@ -942,6 +936,7 @@ elif u["rol"] == "profesor":
                                 num_preg = i + 1
                                 st.markdown(f"#### **Pregunta N° {num_preg}**")
                                 tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo"], key=f"tipo_p_{i}_{cat_id}")
+                                pct_preg = st.number_input(f"Porcentaje de valor de la pregunta #{num_preg} (%):", min_value=1, max_value=100, value=int(100/cant_pregs), key=f"pct_p_{i}_{cat_id}")
                                 
                                 if tipo_p == "Opción Múltiple":
                                     enun = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_mc_{i}_{cat_id}")
@@ -953,15 +948,15 @@ elif u["rol"] == "profesor":
                                         if val_op:
                                             ops_cargadas.append(val_op.strip())
                                     if ops_cargadas:
-                                        corr = st.selectbox(f"Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
+                                        corr = st.selectbox(f"🎯 Indicar cuál es la Opción CORRECTA #{num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}_{cat_id}")
                                         if enun.strip():
-                                            preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr})
+                                            preguntas_generadas.append({"tipo": "multiple_choice", "enunciado": enun.strip(), "opciones": ops_cargadas, "correcta": corr, "porcentaje": pct_preg})
                                 
                                 elif tipo_p == "Verdadero o Falso":
                                     enun_vf = st.text_input(f"Enunciado #{num_preg}:", key=f"enun_vf_{i}_{cat_id}")
-                                    corr_vf = st.radio(f"Correcta #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
+                                    corr_vf = st.radio(f"🎯 Indicar Respuesta CORRECTA #{num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}_{cat_id}")
                                     if enun_vf.strip():
-                                        preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf})
+                                        preguntas_generadas.append({"tipo": "verdadero_falso", "enunciado": enun_vf.strip(), "opciones": ["Verdadero", "Falso"], "correcta": corr_vf, "porcentaje": pct_preg})
 
                                 elif tipo_p == "Completar Párrafo":
                                     texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] #{num_preg}:", key=f"parr_{i}_{cat_id}")
@@ -969,7 +964,7 @@ elif u["rol"] == "profesor":
                                     if texto_parrafo.strip():
                                         palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
                                         if palabras_a_completar:
-                                            preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()]})
+                                            preguntas_generadas.append({"tipo": "completar_espacios", "enunciado": texto_parrafo.strip(), "palabras_correctas": palabras_a_completar, "distractores": [x.strip() for x in distractores.split(",") if x.strip()], "porcentaje": pct_preg})
 
                         enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
 
@@ -1133,7 +1128,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE
+# 🎓 VISTA ESTUDIANTE (CON FILTRO ANTIFRAUDE: SALIR DE PÁGINA FINALIZA EXAMEN)
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1164,6 +1159,105 @@ else:
                                 st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_bf})", data=f_db.read(), file_name=nom_bf, key=f"dl_al_bib_{act['id']}")
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
+
+                    # SI ES EXAMEN / CUESTIONARIO CON FILTRO ANTIFRAUDE DE SALIDA DE PÁGINA
+                    if act['tipo'] == "Cuestionario":
+                        ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
+                        ya_rendido = not ent_al.empty
+
+                        if ya_rendido:
+                            data_e = ent_al.iloc[0]
+                            st.success(f"Examen entregado. Nota obtenida: {data_e['nota']}/10")
+                        else:
+                            if st.session_state.examen_en_curso != act['id']:
+                                if st.button(f"🚀 Comenzar Examen (Aviso: Si cambiás de pestaña o salís de la página, se entregará automáticamente)", key=f"start_ex_{act['id']}"):
+                                    st.session_state.examen_en_curso = act['id']
+                                    st.session_state.tiempo_inicio_examen = time.time()
+                                    st.rerun()
+
+                            if st.session_state.examen_en_curso == act['id']:
+                                # SCRIPT JAVASCRIPT ANTIFRAUDE: Detecta pérdida de foco o cambio de pestaña y fuerza envío
+                                js_antifraude = """
+                                <script>
+                                document.addEventListener("visibilitychange", function() {
+                                    if (document.hidden) {
+                                        alert("¡Atención! Has salido de la página del examen. El sistema ha finalizado y enviado tu evaluación automáticamente.");
+                                        window.location.reload();
+                                    }
+                                });
+                                window.addEventListener("blur", function() {
+                                    alert("¡Atención! Has cambiado de ventana. El examen se ha entregado automáticamente.");
+                                    window.location.reload();
+                                });
+                                </script>
+                                """
+                                st.markdown(js_antifraude, unsafe_allow_html=True)
+
+                                t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
+                                t_total = act['duracion_minutos'] * 60
+                                t_restante = max(0, t_total - t_pasado)
+                                
+                                mins, segs = divmod(t_restante, 60)
+                                st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
+                                
+                                pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
+                                rtas_seleccionadas = {}
+                                
+                                with st.form(f"form_rendir_examen_{act['id']}"):
+                                    for idx, p in enumerate(pregs):
+                                        num_p = idx + 1
+                                        t_p = p.get("tipo", "multiple_choice")
+                                        pct_p = p.get("porcentaje", round(100/len(pregs), 1))
+                                        
+                                        st.markdown(f"**Pregunta N° {num_p}** ({pct_p}% del valor total)")
+                                        
+                                        if t_p == "multiple_choice":
+                                            st.markdown(f"*{p['enunciado']}*")
+                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
+                                        elif t_p == "verdadero_falso":
+                                            st.markdown(f"*{p['enunciado']}*")
+                                            rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
+                                        elif t_p == "completar_espacios":
+                                            st.markdown(f"*{p['enunciado']}*")
+                                            correctas = p['palabras_correctas']
+                                            banco_palabras = list(set(correctas + p.get('distractores', [])))
+                                            resp_gaps = {}
+                                            cols_gaps = st.columns(len(correctas))
+                                            for g_idx, cor in enumerate(correctas):
+                                                with cols_gaps[g_idx]:
+                                                    resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
+                                            rtas_seleccionadas[idx] = resp_gaps
+
+                                    if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
+                                        puntos_ponderados = 0
+                                        for idx, p in enumerate(pregs):
+                                            t_p = p.get("tipo", "multiple_choice")
+                                            pct_p = float(p.get("porcentaje", 100/len(pregs)))
+                                            
+                                            if t_p in ["multiple_choice", "verdadero_falso"]:
+                                                if rtas_seleccionadas.get(idx) == p['correcta']:
+                                                    puntos_ponderados += pct_p
+                                            elif t_p == "completar_espacios":
+                                                correctas = p['palabras_correctas']
+                                                gaps_al = rtas_seleccionadas.get(idx, {})
+                                                aciertos_gaps = sum(1 for g_idx, cor in enumerate(correctas) if gaps_al.get(f"gap_{g_idx}") == cor)
+                                                if correctas:
+                                                    puntos_ponderados += pct_p * (aciertos_gaps / len(correctas))
+
+                                        nota_calc = round(puntos_ponderados / 10, 2)
+                                        nota_calc = min(10.0, max(0.0, nota_calc))
+                                        dev_auto = f"Evaluación finalizada. Calificación ponderada: {nota_calc}/10."
+
+                                        c.execute("""
+                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg, reescritura_autorizada)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+                                            ON CONFLICT(actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data, nota=excluded.nota, devolucion=excluded.devolucion, tiempo_empleado_seg=excluded.tiempo_empleado_seg, reescritura_autorizada=0
+                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
+                                        conn.commit()
+                                        st.session_state.examen_en_curso = None
+                                        st.session_state.tiempo_inicio_examen = None
+                                        st.success(f"Examen enviado correctamente. Nota: {nota_calc}/10")
+                                        st.rerun()
 
     with tab_al_notas:
         st.markdown("### 📊 **Calificaciones**")
