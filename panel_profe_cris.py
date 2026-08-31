@@ -428,7 +428,7 @@ if u["rol"] == "profesor":
 
         tab_curso, tab_participantes, tab_calificaciones, tab_asistencia = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia"])
 
-        # --- 1. PESTAÑA CURSO (NUEVO CREADOR DINÁMICO DE EXÁMENES) ---
+        # --- 1. PESTAÑA CURSO (CREADOR CON 'Pregunta N°' Y OPCIONES DINÁMICAS) ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -451,8 +451,8 @@ if u["rol"] == "profesor":
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / examen", placeholder="Ej: Examen Parcial de Derecho / Prueba Diagnóstica")
-                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los alumnos...")
+                    tit_act = st.text_input("Título de la actividad / examen", placeholder="Ej: Examen Parcial de Derecho / Trabajo Práctico")
+                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los estudiantes...")
                     f_lim = st.date_input("Fecha Límite", min_value=date.today())
 
                     dur_min = 0
@@ -466,28 +466,38 @@ if u["rol"] == "profesor":
                         cant_pregs = st.number_input("Cantidad de preguntas / ítems a configurar:", min_value=1, max_value=25, value=2)
                         
                         for i in range(int(cant_pregs)):
-                            st.markdown(f"#### **Pregunta #{i+1}**")
-                            tipo_p = st.selectbox(f"Tipo de pregunta #{i+1}:", 
+                            num_preg = i + 1
+                            st.markdown(f"#### **Pregunta N° {num_preg}**")
+                            tipo_p = st.selectbox(f"Tipo de Pregunta N° {num_preg}:", 
                                                 ["Opción Múltiple", "Verdadero o Falso", "Completar Párrafo (Palabras arrastrables)"], 
                                                 key=f"tipo_p_{i}")
                             
                             if tipo_p == "Opción Múltiple":
-                                enun = st.text_input(f"Enunciado Pregunta #{i+1}:", placeholder="Ej: ¿Qué órgano ejerce el poder judicial?", key=f"enun_mc_{i}")
-                                ops = st.text_input(f"Opciones separadas por coma (#{i+1}):", placeholder="Corte Suprema, Congreso, Poder Ejecutivo", key=f"ops_mc_{i}")
-                                corr = st.text_input(f"Opción exacta que es la CORRECTA (#{i+1}):", placeholder="Corte Suprema", key=f"corr_mc_{i}")
-                                if enun and ops and corr:
-                                    lista_ops = [x.strip() for x in ops.split(",") if x.strip()]
-                                    preguntas_generadas.append({
-                                        "tipo": "multiple_choice",
-                                        "enunciado": enun.strip(),
-                                        "opciones": lista_ops,
-                                        "correcta": corr.strip()
-                                    })
+                                enun = st.text_input(f"Enunciado de la Pregunta N° {num_preg}:", placeholder="Ej: ¿Qué órgano ejerce el poder judicial?", key=f"enun_mc_{i}")
+                                
+                                cant_opciones = st.number_input(f"Cantidad de opciones para la Pregunta N° {num_preg}:", min_value=2, max_value=10, value=4, key=f"cant_ops_{i}")
+                                
+                                ops_cargadas = []
+                                for op_idx in range(int(cant_opciones)):
+                                    letra = chr(65 + op_idx)
+                                    val_op = st.text_input(f"Opción {letra} (Pregunta N° {num_preg}):", key=f"op_{i}_{op_idx}")
+                                    if val_op.strip():
+                                        ops_cargadas.append(val_op.strip())
+                                
+                                if ops_cargadas:
+                                    corr = st.selectbox(f"Seleccionar cuál es la Opción CORRECTA para la Pregunta N° {num_preg}:", ops_cargadas, key=f"corr_mc_sel_{i}")
+                                    if enun.strip():
+                                        preguntas_generadas.append({
+                                            "tipo": "multiple_choice",
+                                            "enunciado": enun.strip(),
+                                            "opciones": ops_cargadas,
+                                            "correcta": corr
+                                        })
                             
                             elif tipo_p == "Verdadero o Falso":
-                                enun_vf = st.text_input(f"Enunciado Afirmación #{i+1}:", placeholder="Ej: El artículo 14 bis garantiza los derechos del trabajador.", key=f"enun_vf_{i}")
-                                corr_vf = st.radio(f"Respuesta correcta para la afirmación #{i+1}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}")
-                                if enun_vf:
+                                enun_vf = st.text_input(f"Enunciado de la Pregunta N° {num_preg}:", placeholder="Ej: El artículo 14 bis garantiza los derechos del trabajador.", key=f"enun_vf_{i}")
+                                corr_vf = st.radio(f"Respuesta correcta para la Pregunta N° {num_preg}:", ["Verdadero", "Falso"], horizontal=True, key=f"corr_vf_{i}")
+                                if enun_vf.strip():
                                     preguntas_generadas.append({
                                         "tipo": "verdadero_falso",
                                         "enunciado": enun_vf.strip(),
@@ -496,11 +506,11 @@ if u["rol"] == "profesor":
                                     })
 
                             elif tipo_p == "Completar Párrafo (Palabras arrastrables)":
-                                st.info("💡 **Instrucciones:** Escribí el texto y encerrá entre corchetes `[palabra]` las palabras que el alumno deberá completar arrastrando/seleccionando.\n*Ejemplo: El [Poder Judicial] es independiente del [Poder Ejecutivo].*")
-                                texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] (#{i+1}):", key=f"parr_{i}")
-                                distractores = st.text_input(f"Palabras distractoras adicionales (opcional, separadas por coma):", placeholder="Legislativo, Ministro", key=f"distr_{i}")
+                                st.info("💡 **Instrucciones:** Escribí el texto y encerrá entre corchetes `[palabra]` las palabras que el alumno deberá completar.\n*Ejemplo: El [Poder Judicial] es independiente del [Poder Ejecutivo].*")
+                                texto_parrafo = st.text_area(f"Párrafo con lagunas [palabra] (Pregunta N° {num_preg}):", key=f"parr_{i}")
+                                distractores = st.text_input(f"Palabras distractoras extras (opcional, separadas por coma):", placeholder="Legislativo, Ministro", key=f"distr_{i}")
                                 
-                                if texto_parrafo:
+                                if texto_parrafo.strip():
                                     palabras_a_completar = re.findall(r'\[(.*?)\]', texto_parrafo)
                                     if palabras_a_completar:
                                         lista_distr = [x.strip() for x in distractores.split(",") if x.strip()]
@@ -514,7 +524,7 @@ if u["rol"] == "profesor":
                     enlace_url = st.text_input("Enlace web / URL externa (opcional)")
 
                     if st.button("🚀 Publicar Actividad / Examen en el Curso"):
-                        if not tit_act:
+                        if not tit_act.strip():
                             st.error("Por favor completá el título de la actividad.")
                         else:
                             tipo_db = "Cuestionario" if "Examen" in tipo_modulo else ("Tarea" if "Tarea" in tipo_modulo else "Archivo")
@@ -558,7 +568,7 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES DENTRO DE LA SECCIÓN (CON EDICIÓN Y BORRADO INDIVIDUAL)
+                    # ACTIVIDADES DENTRO DE LA SECCIÓN
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
@@ -742,7 +752,6 @@ if u["rol"] == "profesor":
                     with st.expander(f"📌 {ent['alumno']} - {ent['examen']} ({ent['tipo_actividad']}) | Nota: {ent['nota']}{t_min}"):
                         st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
                         
-                        # Si es Examen / Cuestionario
                         if ent['preguntas_json'] and ent['respuesta_data']:
                             st.markdown("#### **Desglose de Preguntas:**")
                             try:
@@ -750,6 +759,7 @@ if u["rol"] == "profesor":
                                 rtas_al = json.loads(ent['respuesta_data'])
                                 
                                 for idx, preg in enumerate(preguntas):
+                                    num_p = idx + 1
                                     t_p = preg.get("tipo", "multiple_choice")
                                     
                                     if t_p in ["multiple_choice", "verdadero_falso"]:
@@ -758,14 +768,14 @@ if u["rol"] == "profesor":
                                         if es_correcta:
                                             st.markdown(f"""
                                             <div class='q-correct'>
-                                                <b>Pregunta {idx+1} ({t_p.replace('_',' ').capitalize()}):</b> {preg['enunciado']}<br>
+                                                <b>Pregunta N° {num_p} ({t_p.replace('_',' ').capitalize()}):</b> {preg['enunciado']}<br>
                                                 ✅ <b>Respuesta del alumno:</b> {rta_dada} (Correcta)
                                             </div>
                                             """, unsafe_allow_html=True)
                                         else:
                                             st.markdown(f"""
                                             <div class='q-wrong'>
-                                                <b>Pregunta {idx+1} ({t_p.replace('_',' ').capitalize()}):</b> {preg['enunciado']}<br>
+                                                <b>Pregunta N° {num_p} ({t_p.replace('_',' ').capitalize()}):</b> {preg['enunciado']}<br>
                                                 ❌ <b>Respuesta del alumno:</b> {rta_dada}<br>
                                                 ✔️ <b>Opción Correcta:</b> {preg['correcta']}
                                             </div>
@@ -785,7 +795,7 @@ if u["rol"] == "profesor":
                                         clase_box = "q-correct" if todas_bien else "q-wrong"
                                         st.markdown(f"""
                                         <div class='{clase_box}'>
-                                            <b>Pregunta {idx+1} (Completar Párrafo):</b><br>
+                                            <b>Pregunta N° {num_p} (Completar Párrafo):</b><br>
                                             {texto_armado}
                                         </div>
                                         """, unsafe_allow_html=True)
@@ -907,7 +917,7 @@ if u["rol"] == "profesor":
                 st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE (CON SOPORTE MULTIMÉTODO DE EXAMEN)
+# 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -970,18 +980,19 @@ else:
                                 
                                 with st.form(f"form_rendir_{act['id']}"):
                                     for idx, p in enumerate(pregs):
+                                        num_p = idx + 1
                                         t_p = p.get("tipo", "multiple_choice")
                                         
                                         if t_p == "multiple_choice":
-                                            st.markdown(f"**Pregunta {idx+1} (Opción Múltiple):** {p['enunciado']}")
+                                            st.markdown(f"**Pregunta N° {num_p} (Opción Múltiple):** {p['enunciado']}")
                                             rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", p['opciones'], key=f"ans_{act['id']}_{idx}")
                                         
                                         elif t_p == "verdadero_falso":
-                                            st.markdown(f"**Pregunta {idx+1} (Verdadero / Falso):** {p['enunciado']}")
+                                            st.markdown(f"**Pregunta N° {num_p} (Verdadero / Falso):** {p['enunciado']}")
                                             rtas_seleccionadas[idx] = st.radio("¿Es verdadero o falso?:", p['opciones'], horizontal=True, key=f"ans_vf_{act['id']}_{idx}")
 
                                         elif t_p == "completar_espacios":
-                                            st.markdown(f"**Pregunta {idx+1} (Completar Párrafo):**")
+                                            st.markdown(f"**Pregunta N° {num_p} (Completar Párrafo):**")
                                             correctas = p['palabras_correctas']
                                             banco_palabras = list(set(correctas + p.get('distractores', [])))
                                             
