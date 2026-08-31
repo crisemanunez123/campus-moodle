@@ -1296,7 +1296,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE (TAREAS CON DOBLE OPCIÓN: ESCRITURA Y ARCHIVO PDF)
+# 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1386,7 +1386,7 @@ else:
                                         st.success("¡Tarea enviada correctamente!")
                                         st.rerun()
 
-                    # SI ES EXAMEN / CUESTIONARIO CON AVISO Y CRONÓMETRO ROJO
+                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
                     elif act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1476,10 +1476,30 @@ else:
                                         st.rerun()
 
     with tab_al_notas:
-        st.markdown("### 📊 **Calificaciones**")
+        st.markdown("### 📊 **Mis Calificaciones y Devoluciones**")
+        
+        # 1. Notas de Períodos
         per_al = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (materia_id, u['id'])).fetchone()
         if per_al:
-            st.write(f"1° Inf: {per_al[0]} | 1° Cuat: {per_al[1]} | 2° Inf: {per_al[2]} | 2° Cuat: {per_al[3]} | Final: {per_al[4]}")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("1° Cuatrimestre", f"{per_al[1]:.2f}" if per_al[1] is not None else "-")
+            c2.metric("2° Cuatrimestre", f"{per_al[3]:.2f}" if per_al[3] is not None else "-")
+            c3.metric("Calificación Final", f"{per_al[4]:.2f}" if per_al[4] is not None else "-")
+
+        st.divider()
+        st.markdown("#### 📝 **Desglose de Trabajos y Exámenes Corregidos:**")
+        
+        df_notas_estudiante = pd.read_sql("""
+            SELECT a.titulo as Actividad, a.tipo as Tipo, e.nota as Calificación, e.devolucion as Devolución, e.fecha_entrega as 'Fecha de Entrega'
+            FROM actividades a
+            JOIN entregas e ON a.id = e.actividad_id
+            WHERE a.catedra_id = ? AND e.estudiante_id = ?
+        """, conn, params=(materia_id, u['id']))
+
+        if df_notas_estudiante.empty:
+            st.info("Aún no tenés calificaciones publicadas en este curso.")
+        else:
+            st.dataframe(df_notas_estudiante, use_container_width=True, hide_index=True)
 
     with tab_al_asist:
         st.markdown("### **Asistencia**")
