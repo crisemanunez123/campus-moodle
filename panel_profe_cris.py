@@ -1128,7 +1128,7 @@ elif u["rol"] == "profesor":
                         st.rerun()
 
 # ==============================================================================
-# 🎓 VISTA ESTUDIANTE (CON FILTRO ANTIFRAUDE: SALIR DE PÁGINA FINALIZA EXAMEN)
+# 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
@@ -1160,7 +1160,7 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES EXAMEN / CUESTIONARIO CON FILTRO ANTIFRAUDE DE SALIDA DE PÁGINA
+                    # SI ES EXAMEN / CUESTIONARIO CON CONTROL DE TIEMPO ESTRICTO
                     if act['tipo'] == "Cuestionario":
                         ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                         ya_rendido = not ent_al.empty
@@ -1170,29 +1170,12 @@ else:
                             st.success(f"Examen entregado. Nota obtenida: {data_e['nota']}/10")
                         else:
                             if st.session_state.examen_en_curso != act['id']:
-                                if st.button(f"🚀 Comenzar Examen (Aviso: Si cambiás de pestaña o salís de la página, se entregará automáticamente)", key=f"start_ex_{act['id']}"):
+                                if st.button(f"🚀 Comenzar Examen (Tenés {act['duracion_minutos']} minutos continuos)", key=f"start_ex_{act['id']}"):
                                     st.session_state.examen_en_curso = act['id']
                                     st.session_state.tiempo_inicio_examen = time.time()
                                     st.rerun()
 
                             if st.session_state.examen_en_curso == act['id']:
-                                # SCRIPT JAVASCRIPT ANTIFRAUDE: Detecta pérdida de foco o cambio de pestaña y fuerza envío
-                                js_antifraude = """
-                                <script>
-                                document.addEventListener("visibilitychange", function() {
-                                    if (document.hidden) {
-                                        alert("¡Atención! Has salido de la página del examen. El sistema ha finalizado y enviado tu evaluación automáticamente.");
-                                        window.location.reload();
-                                    }
-                                });
-                                window.addEventListener("blur", function() {
-                                    alert("¡Atención! Has cambiado de ventana. El examen se ha entregado automáticamente.");
-                                    window.location.reload();
-                                });
-                                </script>
-                                """
-                                st.markdown(js_antifraude, unsafe_allow_html=True)
-
                                 t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
                                 t_total = act['duracion_minutos'] * 60
                                 t_restante = max(0, t_total - t_pasado)
@@ -1200,6 +1183,12 @@ else:
                                 mins, segs = divmod(t_restante, 60)
                                 st.markdown(f"<div class='timer-box'>⏳ Tiempo Restante: {mins:02d}:{segs:02d}</div>", unsafe_allow_html=True)
                                 
+                                if t_restante == 0:
+                                    st.error("¡El tiempo ha expirado! El examen se cerró automáticamente.")
+                                    time.sleep(2)
+                                    st.session_state.examen_en_curso = None
+                                    st.rerun()
+
                                 pregs = json.loads(act['preguntas_json']) if act['preguntas_json'] else []
                                 rtas_seleccionadas = {}
                                 
@@ -1228,7 +1217,7 @@ else:
                                                     resp_gaps[f"gap_{g_idx}"] = st.selectbox(f"Espacio #{g_idx+1}:", ["(Seleccionar)"] + banco_palabras, key=f"gap_{act['id']}_{idx}_{g_idx}")
                                             rtas_seleccionadas[idx] = resp_gaps
 
-                                    if st.form_submit_button("Terminar y Enviar Examen") or t_restante == 0:
+                                    if st.form_submit_button("Terminar y Enviar Examen"):
                                         puntos_ponderados = 0
                                         for idx, p in enumerate(pregs):
                                             t_p = p.get("tipo", "multiple_choice")
