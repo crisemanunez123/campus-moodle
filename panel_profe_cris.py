@@ -87,7 +87,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BASE DE DATOS LOCAL ---
+# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ---
 conn = sqlite3.connect("campus_moodle.db", check_same_thread=False)
 c = conn.cursor()
 
@@ -102,6 +102,17 @@ CREATE TABLE IF NOT EXISTS usuarios (
 )
 """)
 
+# Auto-migrar columnas en caso de bases de datos previas
+try:
+    cols_usuarios = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
+    if "email" not in cols_usuarios:
+        c.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
+    if "rol" not in cols_usuarios:
+        c.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT")
+    conn.commit()
+except Exception:
+    pass
+
 c.execute("""
 CREATE TABLE IF NOT EXISTS catedras (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,6 +123,14 @@ CREATE TABLE IF NOT EXISTS catedras (
     FOREIGN KEY(profesor_id) REFERENCES usuarios(id)
 )
 """)
+
+try:
+    cols_catedras = [col[1] for col in c.execute("PRAGMA table_info(catedras)").fetchall()]
+    if "categoria" not in cols_catedras:
+        c.execute("ALTER TABLE catedras ADD COLUMN categoria TEXT DEFAULT 'Categoría 1'")
+    conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS secciones (
@@ -240,7 +259,7 @@ if "tiempo_inicio_examen" not in st.session_state:
     st.session_state.tiempo_inicio_examen = None
 
 def login(usuario, clave):
-    res = c.execute("SELECT id, username, nombre, email, rol FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
+    res = c.execute("SELECT id, username, nombre, email, rol, password FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
     if res:
         st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4]}
         return True
@@ -342,7 +361,7 @@ if u["rol"] == "profesor":
                 if nom_p and mail_p and usr_p and pwd_p:
                     try:
                         c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'profesor')",
-                                  (usr_p, pwd_p, nom_p, mail_p))
+                                  (usr_p.strip(), pwd_p.strip(), nom_p.strip(), mail_p.strip()))
                         conn.commit()
                         st.success(f"Profesor {nom_p} registrado con éxito.")
                     except sqlite3.IntegrityError:
@@ -514,12 +533,11 @@ if u["rol"] == "profesor":
                             if nom_a and mail_a and usr_a and pwd_a:
                                 try:
                                     c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')",
-                                              (usr_a, pwd_a, nom_a, mail_a))
+                                              (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_a.strip()))
                                     nuevo_u_id = c.lastrowid
                                     c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, nuevo_u_id))
                                     conn.commit()
 
-                                    # Enviar email automático
                                     ok_mail, msg_mail = enviar_credenciales_alumno(mail_a.strip(), nom_a, nombre_materia, usr_a, pwd_a)
                                     if ok_mail:
                                         st.success(f"Alumno {nom_a} matriculado y credenciales enviadas a {mail_a}.")
