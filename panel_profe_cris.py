@@ -6,76 +6,93 @@ import json
 import time
 from datetime import datetime, date
 
-st.set_page_config(page_title="Moodle Campus", page_icon="🎓", layout="wide")
+st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="wide")
 
 CARPETA_ENTREGAS = "entregas_alumnos"
 os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
 
-# --- ESTILOS CSS CLÓNICOS DE MOODLE 4 (FORZADO CLARO Y LEGIBLE) ---
+# --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL ---
 st.markdown("""
 <style>
-    /* Forzar fondo general claro y textos oscuros */
+    /* Fondo general educativo limpio con gradiente sutil */
     .stApp {
-        background-color: #f4f6f9 !important;
-        color: #1d2125 !important;
+        background-color: #f3f6fa !important;
+        background-image: linear-gradient(180deg, #edf2f7 0%, #f7f9fc 100%);
+        color: #1e293b !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     
-    /* Textos y títulos */
+    /* Textos y títulos institucionales */
     h1, h2, h3, h4, h5, h6, p, span, label {
-        color: #1d2125 !important;
+        color: #0f172a !important;
     }
     
-    /* Botones estilo Moodle (Azul institucional) */
+    /* Marca principal */
+    .brand-title {
+        font-size: 26px;
+        font-weight: 800;
+        color: #1b3a6b !important;
+        letter-spacing: -0.5px;
+    }
+    .brand-badge {
+        font-size: 13px;
+        font-weight: 600;
+        color: #0369a1 !important;
+        background: #e0f2fe;
+        padding: 4px 10px;
+        border-radius: 12px;
+        display: inline-block;
+        margin-top: 2px;
+    }
+    
+    /* Botones principales estilo universitario */
     .stButton > button {
-        background-color: #0f6cbf !important;
+        background-color: #1b3a6b !important;
         color: #ffffff !important;
         border-radius: 6px !important;
         border: none !important;
         font-weight: 600 !important;
+        transition: all 0.2s ease-in-out;
     }
     .stButton > button:hover {
-        background-color: #094478 !important;
+        background-color: #0f2444 !important;
         color: #ffffff !important;
-    }
-    
-    /* Marca Moodle Naranja */
-    .moodle-brand {
-        font-size: 26px;
-        font-weight: 800;
-        color: #f98012 !important;
+        box-shadow: 0 4px 12px rgba(27, 58, 107, 0.25);
     }
     
     /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
-        border: 1px solid #dee2e6 !important;
-        border-radius: 8px !important;
+        border: 1px solid #cbd5e1 !important;
+        border-radius: 10px !important;
         overflow: hidden;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.06);
-        margin-bottom: 15px;
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+        margin-bottom: 16px;
     }
-    .card-banner-1 { height: 110px; background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%); }
-    .card-banner-2 { height: 110px; background: linear-gradient(135deg, #00b09b 0%, #96c93d 100%); }
-    .card-banner-3 { height: 110px; background: linear-gradient(135deg, #8a2387 0%, #e94057 50%, #f27121 100%); }
-    .card-banner-4 { height: 110px; background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%); }
+    .card-banner-1 { height: 110px; background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); }
+    .card-banner-2 { height: 110px; background: linear-gradient(135deg, #065f46 0%, #10b981 100%); }
+    .card-banner-3 { height: 110px; background: linear-gradient(135deg, #701a75 0%, #d946ef 100%); }
+    .card-banner-4 { height: 110px; background: linear-gradient(135deg, #0f766e 0%, #14b8a6 100%); }
     
-    .course-card-body { padding: 15px; background: #ffffff !important; }
-    .course-title { font-size: 16px; font-weight: 600; color: #0f6cbf !important; margin-bottom: 4px; }
-    .course-cat { font-size: 13px; color: #6c757d !important; }
+    .course-card-body { padding: 16px; background: #ffffff !important; }
+    .course-title { font-size: 17px; font-weight: 700; color: #1e3a8a !important; margin-bottom: 4px; }
+    .course-cat { font-size: 13px; color: #64748b !important; }
+    
+    /* Timer y cajas de retroalimentación */
     .timer-box {
-        background: #dc3545;
+        background: #be123c;
         color: white !important;
-        padding: 10px;
-        border-radius: 6px;
+        padding: 12px;
+        border-radius: 8px;
         font-weight: bold;
-        font-size: 20px;
+        font-size: 22px;
         text-align: center;
         margin-bottom: 15px;
+        box-shadow: 0 4px 6px rgba(190, 18, 60, 0.2);
     }
-    .q-correct { background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #155724 !important; }
-    .q-wrong { background-color: #f8d7da; border-left: 5px solid #dc3545; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #721c24 !important; }
-    .task-response-box { background-color: #eef2f7; border-left: 4px solid #0f6cbf; padding: 12px; border-radius: 4px; margin-bottom: 12px; }
+    .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
+    .q-wrong { background-color: #ffe4e6; border-left: 5px solid #e11d48; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #881337 !important; }
+    .task-response-box { background-color: #f1f5f9; border-left: 5px solid #1b3a6b; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -163,7 +180,7 @@ conn.commit()
 
 # --- USUARIOS INICIALES ---
 if c.execute("SELECT COUNT(*) FROM usuarios").fetchone()[0] == 0:
-    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('profesor', '1234', 'Prof. Cristian Nuñez', 'prof@moodle.edu', 'profesor')")
+    c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('profesor', '1234', 'Prof. Cristian Nuñez', 'prof@educacion.edu', 'profesor')")
     c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES ('alumno1', '1234', 'Juan Pérez', 'juan@gmail.com', 'estudiante')")
     conn.commit()
 
@@ -178,7 +195,7 @@ if "tiempo_inicio_examen" not in st.session_state:
     st.session_state.tiempo_inicio_examen = None
 
 def login(usuario, clave):
-    res = c.execute("SELECT id, username, nombre, email, rol FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
+    res = c.execute("SELECT id, username, nombre, email, rol, password FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
     if res:
         st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4]}
         return True
@@ -191,50 +208,94 @@ def logout():
     st.session_state.tiempo_inicio_examen = None
     st.rerun()
 
-# --- LOGIN SCREEN ---
+# --- PANTALLA DE ACCESO / LOGIN ---
 if st.session_state.user is None:
-    st.markdown("<div class='moodle-brand' style='text-align: center; margin-top: 40px;'>Moodle</div>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: #6c757d;'>Plataforma Educativa</p>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("<div class='brand-title' style='text-align: center;'>🎓 Plataforma Educativa</div>", unsafe_allow_html=True)
+    st.markdown("<div style='text-align: center;'><span class='brand-badge'>Created by Tec. Cristian Nuñez</span></div>", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    
     col1, col2, col3 = st.columns([1, 1, 1])
     with col2:
         with st.form("form_login"):
-            st.subheader("Acceso al Campus")
+            st.subheader("Ingreso al Campus Virtual")
             u_input = st.text_input("Usuario")
             p_input = st.text_input("Contraseña", type="password")
-            if st.form_submit_button("Acceder", use_container_width=True):
+            if st.form_submit_button("Acceder al Sistema", use_container_width=True):
                 if login(u_input, p_input):
-                    st.success("Ingresando...")
+                    st.success("Acceso concedido.")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas (Profesor: `profesor`/`1234`)")
+                    st.error("Credenciales incorrectas (Profesor inicial: `profesor`/`1234`)")
     st.stop()
 
-# --- HEADER GLOBAL ---
+# --- ENCABEZADO GLOBAL CON GESTIÓN DE PERFIL ---
 u = st.session_state.user
-col_h1, col_h2, col_h3 = st.columns([2, 5, 2])
+col_h1, col_h2, col_h3 = st.columns([3, 5, 4])
 with col_h1:
-    if st.button("🏠 Área personal", key="btn_home"):
+    if st.button("🏛️ Área personal", key="btn_home"):
         st.session_state.materia_seleccionada_id = None
         st.rerun()
+
 with col_h2:
-    st.markdown(f"<span style='font-size:18px; font-weight:700;'>Moodle</span> &nbsp;|&nbsp; {u['nombre']} (`{u['rol'].capitalize()}`)", unsafe_allow_html=True)
+    st.markdown(f"**🎓 Plataforma Educativa** &nbsp;|&nbsp; {u['nombre']} (`{u['rol'].capitalize()}`)<br><small style='color: #0369a1;'>Created by Tec. Cristian Nuñez</small>", unsafe_allow_html=True)
+
 with col_h3:
-    if st.button("Cerrar sesión", key="btn_logout_top"):
-        logout()
+    c_btn1, c_btn2 = st.columns([1, 1])
+    with c_btn1:
+        with st.popover("🔑 Cambiar Clave"):
+            with st.form("form_cambio_clave_usuario"):
+                st.markdown("##### Actualizar Contraseña")
+                pass_act = st.text_input("Contraseña actual", type="password")
+                pass_n1 = st.text_input("Nueva contraseña", type="password")
+                pass_n2 = st.text_input("Confirmar nueva contraseña", type="password")
+                if st.form_submit_button("Guardar Cambios"):
+                    chk = c.execute("SELECT id FROM usuarios WHERE id = ? AND password = ?", (u["id"], pass_act)).fetchone()
+                    if not chk:
+                        st.error("La contraseña actual es incorrecta.")
+                    elif pass_n1 != pass_n2:
+                        st.error("Las nuevas contraseñas no coinciden.")
+                    elif len(pass_n1) < 3:
+                        st.error("La contraseña debe tener al menos 3 caracteres.")
+                    else:
+                        c.execute("UPDATE usuarios SET password = ? WHERE id = ?", (pass_n1, u["id"]))
+                        conn.commit()
+                        st.success("¡Contraseña actualizada con éxito!")
+    with c_btn2:
+        if st.button("Cerrar sesión", key="btn_logout_top"):
+            logout()
 
 st.divider()
 
 # ==============================================================================
-# 👨‍🏫 VISTA PROFESOR
+# 👨‍🏫 VISTA PROFESOR / DOCENTE
 # ==============================================================================
 if u["rol"] == "profesor":
 
+    # BARRA LATERAL: ALTA DE OTROS PROFESORES
+    st.sidebar.markdown("### 🏛️ Administración del Campus")
+    with st.sidebar.expander("👨‍🏫 Crear Nuevo Usuario Profesor"):
+        with st.form("form_crear_nuevo_profe", clear_on_submit=True):
+            nom_p = st.text_input("Nombre y Apellido del Profesor")
+            mail_p = st.text_input("Email Institucional/Personal")
+            usr_p = st.text_input("Usuario Docente")
+            pwd_p = st.text_input("Contraseña", value="1234")
+            if st.form_submit_button("Registrar Profesor"):
+                if nom_p and mail_p and usr_p and pwd_p:
+                    try:
+                        c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'profesor')",
+                                  (usr_p, pwd_p, nom_p, mail_p))
+                        conn.commit()
+                        st.success(f"Profesor {nom_p} registrado exitosamente.")
+                    except sqlite3.IntegrityError:
+                        st.error("El nombre de usuario o email ya existe.")
+
     # VISTA DASHBOARD (TARJETAS DE CURSOS)
     if st.session_state.materia_seleccionada_id is None:
-        st.markdown("## **Vista general de curso**")
+        st.markdown("## **Vista General de Cursos**")
         col_btn1, col_btn2 = st.columns([1, 4])
         with col_btn1:
-            with st.popover("➕ Crear curso"):
+            with st.popover("➕ Crear Curso"):
                 with st.form("form_crear_materia", clear_on_submit=True):
                     nom_mat = st.text_input("Nombre del Curso")
                     cod_mat = st.text_input("Código de Comisión (ej: LSO-4TO)")
@@ -244,7 +305,7 @@ if u["rol"] == "profesor":
                             c.execute("INSERT INTO catedras (nombre, codigo, categoria, profesor_id) VALUES (?, ?, ?, ?)",
                                       (nom_mat, cod_mat, cat_mat, u["id"]))
                             conn.commit()
-                            st.success("Materia creada.")
+                            st.success("Materia creada correctamente.")
                             st.rerun()
                         except sqlite3.IntegrityError:
                             st.error("Ya existe una materia con ese código.")
@@ -252,7 +313,7 @@ if u["rol"] == "profesor":
         df_materias = pd.read_sql("SELECT id, nombre, codigo, categoria FROM catedras WHERE profesor_id = ?", conn, params=(u["id"],))
 
         if df_materias.empty:
-            st.info("Aún no tienes cursos creados. Pulsa '➕ Crear curso' para comenzar.")
+            st.info("Aún no tienes cursos creados. Pulsa '➕ Crear Curso' para comenzar.")
         else:
             cols = st.columns(3)
             banners = ["card-banner-1", "card-banner-2", "card-banner-3", "card-banner-4"]
@@ -278,7 +339,6 @@ if u["rol"] == "profesor":
         res_cat = c.execute("SELECT nombre, codigo FROM catedras WHERE id = ?", (cat_id,)).fetchone()
         nombre_materia = res_cat[0]
 
-        st.sidebar.markdown("### ⚙️ Administración del curso")
         if st.sidebar.button("⬅️ Volver a mis Cursos"):
             st.session_state.materia_seleccionada_id = None
             st.rerun()
@@ -341,7 +401,7 @@ if u["rol"] == "profesor":
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                             """, (cat_id, sec_map[sec_elegida], tit_act, tipo_db, str(f_lim), dur_min, json_preguntas, desc_act, enlace_url))
                             conn.commit()
-                            st.success("Actividad publicada.")
+                            st.success("Actividad publicada exitosamente.")
                             st.rerun()
 
             df_secciones = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
@@ -403,7 +463,7 @@ if u["rol"] == "profesor":
                             try:
                                 c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, map_existentes[sel_ex]))
                                 conn.commit()
-                                st.success("Matriculado.")
+                                st.success("Matriculado correctamente.")
                                 st.rerun()
                             except sqlite3.IntegrityError:
                                 st.warning("Ya se encuentra matriculado en esta materia.")
@@ -420,7 +480,7 @@ if u["rol"] == "profesor":
 
         # --- 3. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
-            st.markdown("### **Libro de Calificaciones Central**")
+            st.markdown("### **Libro Central de Calificaciones**")
             
             alumnos_curso = pd.read_sql("""
                 SELECT u.id, u.nombre, u.email 
@@ -431,7 +491,7 @@ if u["rol"] == "profesor":
             acts_curso = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(cat_id,))
 
             if alumnos_curso.empty:
-                st.info("No hay alumnos matriculados.")
+                st.info("No hay alumnos matriculados en esta cátedra.")
             elif acts_curso.empty:
                 st.info("No hay actividades evaluativas creadas.")
             else:
@@ -527,7 +587,7 @@ if u["rol"] == "profesor":
                             else:
                                 st.write("*(Sin texto desarrollado)*")
 
-                            # Botón para descargar o ver el archivo adjunto
+                            # Botón de Descarga del Archivo Adjunto
                             if ent['archivo_ruta'] and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
                                 with open(ent['archivo_ruta'], "rb") as f_adj:
@@ -538,7 +598,7 @@ if u["rol"] == "profesor":
                                         key=f"dl_{ent['entrega_id']}"
                                     )
                             elif ent['archivo_ruta']:
-                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}` (no encontrado en disco temporal).")
+                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}` (no encontrado en almacenamiento temporal).")
                             else:
                                 st.info("El alumno no adjuntó archivos en esta entrega.")
 
