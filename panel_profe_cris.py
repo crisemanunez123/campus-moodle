@@ -15,13 +15,13 @@ st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="
 CARPETA_ENTREGAS = "entregas_alumnos"
 os.makedirs(CARPETA_ENTREGAS, exist_ok=True)
 
-# --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL ---
+# --- ESTILOS CSS CON TEMA EDUCATIVO PROFESIONAL Y ALTO CONTRASTE ---
 st.markdown("""
 <style>
     .stApp {
-        background-color: #f3f6fa !important;
-        background-image: linear-gradient(180deg, #edf2f7 0%, #f7f9fc 100%);
-        color: #1e293b !important;
+        background-color: #f8fafc !important;
+        background-image: linear-gradient(180deg, #f1f5f9 0%, #ffffff 100%);
+        color: #0f172a !important;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     }
     h1, h2, h3, h4, h5, h6, p, span, label {
@@ -30,32 +30,40 @@ st.markdown("""
     .brand-title {
         font-size: 26px;
         font-weight: 800;
-        color: #1b3a6b !important;
+        color: #1d4ed8 !important;
         letter-spacing: -0.5px;
     }
     .brand-badge {
         font-size: 13px;
         font-weight: 600;
-        color: #0369a1 !important;
+        color: #0284c7 !important;
         background: #e0f2fe;
         padding: 4px 10px;
         border-radius: 12px;
         display: inline-block;
         margin-top: 2px;
     }
+    
+    /* Botones con fondo azul nítido y texto blanco forzado */
     .stButton > button {
-        background-color: #1b3a6b !important;
+        background-color: #2563eb !important;
         color: #ffffff !important;
         border-radius: 6px !important;
-        border: none !important;
+        border: 1px solid #1d4ed8 !important;
         font-weight: 600 !important;
+        box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2) !important;
         transition: all 0.2s ease-in-out;
     }
-    .stButton > button:hover {
-        background-color: #0f2444 !important;
+    .stButton > button * {
         color: #ffffff !important;
-        box-shadow: 0 4px 12px rgba(27, 58, 107, 0.25);
     }
+    .stButton > button:hover {
+        background-color: #1d4ed8 !important;
+        color: #ffffff !important;
+        box-shadow: 0 4px 10px rgba(29, 78, 216, 0.3) !important;
+    }
+    
+    /* Tarjetas de cursos */
     .course-card {
         background: #ffffff !important;
         border: 1px solid #cbd5e1 !important;
@@ -72,7 +80,7 @@ st.markdown("""
     .course-title { font-size: 17px; font-weight: 700; color: #1e3a8a !important; margin-bottom: 4px; }
     .course-cat { font-size: 13px; color: #64748b !important; }
     .timer-box {
-        background: #be123c;
+        background: #dc2626;
         color: white !important;
         padding: 12px;
         border-radius: 8px;
@@ -80,14 +88,14 @@ st.markdown("""
         font-size: 22px;
         text-align: center;
         margin-bottom: 15px;
-        box-shadow: 0 4px 6px rgba(190, 18, 60, 0.2);
+        box-shadow: 0 4px 6px rgba(220, 38, 38, 0.2);
     }
     .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
-    .q-wrong { background-color: #ffe4e6; border-left: 5px solid #e11d48; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #881337 !important; }
-    .task-response-box { background-color: #f1f5f9; border-left: 5px solid #1b3a6b; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
+    .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
+    .task-response-box { background-color: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
     .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
     .forum-msg-docente {
-        background-color: #e0f2fe;
+        background-color: #f0f9ff;
         border-left: 5px solid #0284c7;
         padding: 12px 16px;
         border-radius: 8px;
@@ -119,16 +127,6 @@ CREATE TABLE IF NOT EXISTS usuarios (
     rol TEXT
 )
 """)
-
-try:
-    cols_usuarios = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
-    if "email" not in cols_usuarios:
-        c.execute("ALTER TABLE usuarios ADD COLUMN email TEXT")
-    if "rol" not in cols_usuarios:
-        c.execute("ALTER TABLE usuarios ADD COLUMN rol TEXT")
-    conn.commit()
-except Exception:
-    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS catedras (
@@ -163,10 +161,20 @@ CREATE TABLE IF NOT EXISTS actividades (
     preguntas_json TEXT,
     descripcion TEXT,
     enlace_archivo TEXT,
+    es_obligatorio INTEGER DEFAULT 0,
     FOREIGN KEY(catedra_id) REFERENCES catedras(id),
     FOREIGN KEY(seccion_id) REFERENCES secciones(id)
 )
 """)
+
+# Migración para campo obligatorio
+try:
+    cols_act = [col[1] for col in c.execute("PRAGMA table_info(actividades)").fetchall()]
+    if "es_obligatorio" not in cols_act:
+        c.execute("ALTER TABLE actividades ADD COLUMN es_obligatorio INTEGER DEFAULT 0")
+        conn.commit()
+except Exception:
+    pass
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS matriculas (
@@ -510,9 +518,13 @@ if u["rol"] == "profesor":
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / foro / examen / video", placeholder="Ej: Video Clase Magistral / Examen Parcial")
+                    tit_act = st.text_input("Título de la actividad / foro / examen / video", placeholder="Ej: Foro de Debate / Examen Parcial")
                     desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los participantes...")
                     f_lim = st.date_input("Fecha Límite", min_value=date.today())
+
+                    es_obligatorio_val = 0
+                    if "Foro" in tipo_modulo:
+                        es_obligatorio_val = 1 if st.checkbox("📌 ¿Este foro es evaluativo y obligatorio? (Se sumará al Libro de Calificaciones)", value=False) else 0
 
                     dur_min = 0
                     preguntas_generadas = []
@@ -597,9 +609,9 @@ if u["rol"] == "profesor":
                             json_str = json.dumps(preguntas_generadas, ensure_ascii=False) if tipo_db == "Cuestionario" else None
                             
                             c.execute("""
-                                INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, enlace_url))
+                                INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo, es_obligatorio)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, enlace_url, es_obligatorio_val))
                             conn.commit()
                             st.success("¡Publicado exitosamente!")
                             st.rerun()
@@ -636,7 +648,7 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES CON FORMATO PLEGABLE Y REPRODUCTOR DE VIDEO
+                    # ACTIVIDADES CON FORMATO PLEGABLE
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
@@ -646,9 +658,10 @@ if u["rol"] == "profesor":
                             
                             ico = "💬" if a['tipo'] == 'Foro' else ("⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(a['enlace_archivo']) else "🔗")))
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
+                            tag_eval = " [Evaluativo]" if (a['tipo'] == 'Foro' and a['es_obligatorio'] == 1) else ""
                             
                             with col_act_main:
-                                with st.expander(f"{ico} {a['titulo']} ({a['tipo']}){t_lbl} — Vence: {a['fecha_limite']}"):
+                                with st.expander(f"{ico} {a['titulo']} ({a['tipo']}{tag_eval}){t_lbl} — Vence: {a['fecha_limite']}"):
                                     if a['descripcion']:
                                         st.markdown(f"**📌 Consigna / Descripción:**")
                                         st.markdown(a['descripcion'])
@@ -709,6 +722,10 @@ if u["rol"] == "profesor":
                                             fecha_actual = date.today()
                                         n_f_lim = st.date_input("Fecha Límite", value=fecha_actual)
                                         
+                                        n_es_ob = a['es_obligatorio']
+                                        if a['tipo'] == "Foro":
+                                            n_es_ob = 1 if st.checkbox("¿Es foro obligatorio/evaluativo?", value=(a['es_obligatorio'] == 1)) else 0
+
                                         n_dur = a['duracion_minutos']
                                         n_preg_json = a['preguntas_json']
                                         if a['tipo'] == "Cuestionario":
@@ -726,9 +743,9 @@ if u["rol"] == "profesor":
                                         if st.form_submit_button("Guardar Cambios") and n_tit_act:
                                             c.execute("""
                                                 UPDATE actividades 
-                                                SET seccion_id = ?, titulo = ?, descripcion = ?, fecha_limite = ?, duracion_minutos = ?, preguntas_json = ?, enlace_archivo = ?
+                                                SET seccion_id = ?, titulo = ?, descripcion = ?, fecha_limite = ?, duracion_minutos = ?, preguntas_json = ?, enlace_archivo = ?, es_obligatorio = ?
                                                 WHERE id = ?
-                                            """, (sec_opts[n_sec_elegida], n_tit_act.strip(), n_desc_act, str(n_f_lim), n_dur, n_preg_json, n_enlace, a['id']))
+                                            """, (sec_opts[n_sec_elegida], n_tit_act.strip(), n_desc_act, str(n_f_lim), n_dur, n_preg_json, n_enlace, n_es_ob, a['id']))
                                             conn.commit()
                                             st.success("Actividad modificada exitosamente.")
                                             st.rerun()
@@ -742,7 +759,7 @@ if u["rol"] == "profesor":
                                     st.success("Actividad eliminada.")
                                     st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES ---
+        # --- 2. PESTAÑA PARTICIPANTES (CON EDICIÓN Y BORRADO DE ALUMNOS) ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -787,17 +804,53 @@ if u["rol"] == "profesor":
                             except sqlite3.IntegrityError:
                                 st.warning("Ya se encuentra matriculado en esta materia.")
 
-            st.markdown("### **Lista de Matriculados**")
+            st.divider()
+            st.markdown("### **Lista y Gestión de Matriculados**")
+            
             df_matriculados = pd.read_sql("""
-                SELECT u.nombre as 'Nombre / Apellido(s)', u.email as 'Dirección de correo', u.username as 'Usuario'
+                SELECT u.id as user_id, u.nombre, u.email, u.username, u.password
                 FROM matriculas m
                 JOIN usuarios u ON m.estudiante_id = u.id
                 WHERE m.catedra_id = ?
                 ORDER BY u.nombre ASC
             """, conn, params=(cat_id,))
-            st.dataframe(df_matriculados, use_container_width=True, hide_index=True)
 
-        # --- 3. PESTAÑA CALIFICACIONES ---
+            if df_matriculados.empty:
+                st.info("No hay alumnos matriculados en esta cátedra.")
+            else:
+                for _, al_row in df_matriculados.iterrows():
+                    col_al_info, col_al_edit, col_al_del = st.columns([5, 1.2, 1.2])
+                    
+                    with col_al_info:
+                        st.markdown(f"👤 **{al_row['nombre']}** &nbsp;|&nbsp; 📧 `{al_row['email']}` &nbsp;|&nbsp; 🔑 Usuario: `{al_row['username']}`")
+
+                    with col_al_edit:
+                        with st.popover("✏️ Modificar", key=f"pop_edit_al_{al_row['user_id']}"):
+                            with st.form(f"form_modificar_alumno_{al_row['user_id']}"):
+                                st.markdown(f"##### Editar datos de {al_row['nombre']}")
+                                n_nom_al = st.text_input("Nombre y Apellido", value=al_row['nombre'])
+                                n_mail_al = st.text_input("Email", value=al_row['email'])
+                                n_pwd_al = st.text_input("Contraseña", value=al_row['password'])
+                                
+                                if st.form_submit_button("Guardar Cambios"):
+                                    if n_nom_al and n_mail_al and n_pwd_al:
+                                        c.execute("""
+                                            UPDATE usuarios 
+                                            SET nombre = ?, email = ?, password = ?
+                                            WHERE id = ?
+                                        """, (n_nom_al.strip(), n_mail_al.strip(), n_pwd_al.strip(), al_row['user_id']))
+                                        conn.commit()
+                                        st.success("Datos del alumno actualizados.")
+                                        st.rerun()
+
+                    with col_al_del:
+                        if st.button("🗑️ Dar de Baja", key=f"del_mat_{al_row['user_id']}", help="Desmatricular de la materia"):
+                            c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
+                            conn.commit()
+                            st.success(f"{al_row['nombre']} desmatriculado/a.")
+                            st.rerun()
+
+        # --- 3. PESTAÑA CALIFICACIONES (INCLUYE FOROS OBLIGATORIOS) ---
         with tab_calificaciones:
             st.markdown("### **Libro Central de Calificaciones**")
             
@@ -807,12 +860,17 @@ if u["rol"] == "profesor":
                 WHERE m.catedra_id = ? ORDER BY u.nombre ASC
             """, conn, params=(cat_id,))
 
-            acts_curso = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(cat_id,))
+            # Tareas, Cuestionarios y Foros marcados como obligatorios
+            acts_curso = pd.read_sql("""
+                SELECT id, titulo, tipo FROM actividades 
+                WHERE catedra_id = ? AND (tipo IN ('Tarea', 'Cuestionario') OR (tipo = 'Foro' AND es_obligatorio = 1))
+                ORDER BY id ASC
+            """, conn, params=(cat_id,))
 
             if alumnos_curso.empty:
                 st.info("No hay alumnos matriculados en esta cátedra.")
             elif acts_curso.empty:
-                st.info("No hay actividades evaluativas creadas.")
+                st.info("No hay actividades evaluativas creadas (tareas, exámenes o foros obligatorios).")
             else:
                 tabla_calif = []
                 for _, al in alumnos_curso.iterrows():
@@ -848,15 +906,48 @@ if u["rol"] == "profesor":
                 st.dataframe(df_render, use_container_width=True, hide_index=True)
 
             st.divider()
-            st.markdown("### **Revisión Detallada de Exámenes y Devoluciones**")
+            st.markdown("### **Revisión Detallada, Calificación de Tareas y Foros**")
             
+            # Formulario para calificar foros obligatorios por alumno
+            foros_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo = 'Foro' AND es_obligatorio = 1", conn, params=(cat_id,))
+            if not foros_eval.empty and not alumnos_curso.empty:
+                st.markdown("#### 💬 **Calificar Participación en Foros Obligatorios:**")
+                for _, f_eval in foros_eval.iterrows():
+                    with st.expander(f"Calificar: {f_eval['titulo']} (Foro Evaluativo)"):
+                        for _, al_f in alumnos_curso.iterrows():
+                            c_f1, c_f2, c_f3 = st.columns([3, 2, 3])
+                            nota_f_act = c.execute("SELECT nota, devolucion FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (f_eval['id'], al_f['id'])).fetchone()
+                            
+                            c_f1.write(f"👤 **{al_f['nombre']}**")
+                            
+                            # Cantidad de mensajes que escribió el alumno en este foro
+                            mensajes_al_cant = c.execute("SELECT COUNT(*) FROM foro_mensajes WHERE actividad_id = ? AND usuario_id = ?", (f_eval['id'], al_f['id'])).fetchone()[0]
+                            c_f2.caption(f"Aportes realizados: {mensajes_al_cant}")
+                            
+                            with c_f3:
+                                with st.popover(f"Calificar a {al_f['nombre'].split()[0]}", key=f"pop_cal_foro_{f_eval['id']}_{al_f['id']}"):
+                                    with st.form(f"form_nota_foro_{f_eval['id']}_{al_f['id']}"):
+                                        n_foro_val = st.number_input("Nota Foro (0-10):", min_value=0.0, max_value=10.0, value=float(nota_f_act[0]) if nota_f_act and nota_f_act[0] is not None else 8.0)
+                                        dev_foro_val = st.text_area("Devolución:", value=nota_f_act[1] if nota_f_act and nota_f_act[1] else "Excelente participación en el foro.")
+                                        if st.form_submit_button("Guardar Nota"):
+                                            c.execute("""
+                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion)
+                                                VALUES (?, ?, ?, 'Participación en Foro', ?, ?)
+                                                ON CONFLICT(actividad_id, estudiante_id)
+                                                DO UPDATE SET nota = excluded.nota, devolucion = excluded.devolucion, fecha_entrega = excluded.fecha_entrega
+                                            """, (f_eval['id'], al_f['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), n_foro_val, dev_foro_val))
+                                            conn.commit()
+                                            st.success("Nota de foro guardada.")
+                                            st.rerun()
+
+            # Entregas de Tareas y Exámenes
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
                        e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega
                 FROM entregas e
                 JOIN actividades a ON e.actividad_id = a.id
                 JOIN usuarios u ON e.estudiante_id = u.id
-                WHERE a.catedra_id = ?
+                WHERE a.catedra_id = ? AND a.tipo IN ('Tarea', 'Cuestionario')
             """, conn, params=(cat_id,))
 
             if not entregas_db.empty:
@@ -949,8 +1040,6 @@ if u["rol"] == "profesor":
                                 conn.commit()
                                 st.success("Calificación guardada exitosamente.")
                                 st.rerun()
-            else:
-                st.info("No hay exámenes o tareas entregadas pendientes de revisión.")
 
         # --- 4. PESTAÑA ASISTENCIA ---
         with tab_asistencia:
@@ -1059,9 +1148,10 @@ else:
             
             for _, act in acts_al.iterrows():
                 ico = "💬" if act['tipo'] == 'Foro' else ("⏱️" if act['tipo'] == 'Cuestionario' else ("📄" if act['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(act['enlace_archivo']) else "🔗")))
+                tag_ob = " [Evaluativo]" if (act['tipo'] == 'Foro' and act['es_obligatorio'] == 1) else ""
                 
                 if act['tipo'] == "Foro":
-                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}) — Vence: {act['fecha_limite']}"):
+                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}{tag_ob}) — Vence: {act['fecha_limite']}"):
                         st.markdown(f"**📌 Tema de debate / Consigna:**")
                         st.write(act['descripcion'])
                         
@@ -1224,7 +1314,7 @@ else:
             SELECT a.titulo as Actividad, a.tipo as Tipo, e.nota as Calificación, e.devolucion as Devolución, e.fecha_entrega as 'Fecha de Entrega'
             FROM actividades a
             LEFT JOIN entregas e ON a.id = e.actividad_id AND e.estudiante_id = ?
-            WHERE a.catedra_id = ?
+            WHERE a.catedra_id = ? AND (a.tipo IN ('Tarea', 'Cuestionario') OR (a.tipo = 'Foro' AND a.es_obligatorio = 1))
         """, conn, params=(u['id'], materia_id))
         st.dataframe(df_notas_al, use_container_width=True, hide_index=True)
 
