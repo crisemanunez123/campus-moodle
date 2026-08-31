@@ -106,10 +106,6 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 15px;
     }
-    .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
-    .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
-    .task-response-box { background-color: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
-    .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
     .forum-msg-docente {
         background-color: #f0f9ff;
         border-left: 5px solid #0284c7;
@@ -1015,7 +1011,42 @@ elif u["rol"] == "profesor":
                                 else:
                                     renderizar_recurso_multimedia(a['enlace_archivo'])
 
-                            if a['tipo'] == "Cuestionario" and a['preguntas_json']:
+                            # SI ES FORO, PERMITIR RESPUESTAS Y DEBATES CRUZADOS ENTRE ALUMNOS Y DOCENTE
+                            if a['tipo'] == "Foro":
+                                st.divider()
+                                st.markdown("#### 💬 **Debate del Foro:**")
+                                mensajes_foro = pd.read_sql("""
+                                    SELECT m.id, m.mensaje, m.fecha, u.nombre, u.rol
+                                    FROM foro_mensajes m
+                                    JOIN usuarios u ON m.usuario_id = u.id
+                                    WHERE m.actividad_id = ?
+                                    ORDER BY m.id ASC
+                                """, conn, params=(a['id'],))
+
+                                if mensajes_foro.empty:
+                                    st.info("Aún no hay aportes en este foro. ¡Sé el primero en participar!")
+                                else:
+                                    for _, m_row in mensajes_foro.iterrows():
+                                        es_docente = (m_row['rol'] == 'profesor' or m_row['rol'] == 'admin')
+                                        clase_css = "forum-msg-docente" if es_docente else "forum-msg-alumno"
+                                        badge_rol = "👨‍🏫 Docente" if es_docente else "🎓 Estudiante"
+                                        
+                                        st.markdown(f"""
+                                        <div class='{clase_css}'>
+                                            <b>{m_row['nombre']}</b> &nbsp;<small style='color:#64748b;'>({badge_rol}) — {m_row['fecha']}</small><br>
+                                            <p style='margin-top: 6px; margin-bottom: 0px;'>{m_row['mensaje']}</p>
+                                        </div>
+                                        """, unsafe_allow_html=True)
+
+                                with st.form(f"form_foro_profe_{a['id']}", clear_on_submit=True):
+                                    txt_foro = st.text_area("Escribir respuesta en el foro:", key=f"txt_foro_p_{a['id']}")
+                                    if st.form_submit_button("Publicar respuesta") and txt_foro.strip():
+                                        c.execute("INSERT INTO foro_mensajes (actividad_id, usuario_id, mensaje, fecha) VALUES (?, ?, ?, ?)", (a['id'], u['id'], txt_foro.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                        conn.commit()
+                                        st.success("Publicado.")
+                                        st.rerun()
+
+                            elif a['tipo'] == "Cuestionario" and a['preguntas_json']:
                                 with st.popover("👀 Vista Previa"):
                                     st.markdown(f"#### ⏱️ Examen: {a['titulo']}")
                                     try:
@@ -1054,7 +1085,7 @@ elif u["rol"] == "profesor":
                             st.success("Eliminado.")
                             st.rerun()
 
-        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (CON PORCENTAJE DE IA Y COLOR CONDICIONAL) ---
+        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS ---
         with tab_correccion:
             st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
             st.caption("Revisá las entregas de los estudiantes, visualizá el porcentaje de IA utilizado (>50% en rojo, ≤50% en verde) y volcá las calificaciones a la planilla central.")
@@ -1146,7 +1177,7 @@ elif u["rol"] == "profesor":
                                 st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
                                 st.rerun()
 
-        # --- 3. PESTAÑA PARTICIPANTES (MATRICULACIÓN SIMPLIFICADA Y LISTADO ABAJO) ---
+        # --- 3. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **👥 Gestión de Participantes y Alumnos**")
             st.caption("Matriculá nuevos alumnos ingresando únicamente su nombre, apellido, usuario y contraseña.")
