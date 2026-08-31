@@ -905,7 +905,6 @@ elif u["rol"] == "profesor":
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()), key=f"sec_elegida_sel_{cat_id}")
 
-                    # Formulario limpio con clear_on_submit=True para que se reinicie a cero al publicar
                     with st.form(f"form_publicar_recurso_{cat_id}", clear_on_submit=True):
                         tit_act = st.text_input("Título de la actividad / bibliografía / foro / examen", placeholder="Ej: Material de lectura / Examen Parcial")
                         desc_act = st.text_area("Descripción / Consigna", placeholder="Detalles o instrucciones...")
@@ -913,7 +912,7 @@ elif u["rol"] == "profesor":
 
                         es_obligatorio_val = 0
                         if "Bibliografía" in tipo_modulo:
-                            caracter_biblio = st.radio("Carácter de la Bibliografía:", ["Bibliografía Obligatoria", "Bibliografía Optativa"], horizontal=True)
+                            caracter_biblio = st.radio("Carácter:", ["Bibliografía Obligatoria", "Bibliografía Optativa"], horizontal=True)
                             es_obligatorio_val = 1 if caracter_biblio == "Bibliografía Obligatoria" else 0
                         elif "Foro" in tipo_modulo:
                             es_obligatorio_val = 1 if st.checkbox("📌 Foro obligatorio/evaluativo", value=False) else 0
@@ -962,7 +961,6 @@ elif u["rol"] == "profesor":
 
                         enlace_url = st.text_input("Enlace web / URL de Video (opcional)", key=f"enlace_url_act_{cat_id}")
 
-                        # SIEMPRE DISPONIBLE EN BIBLIOGRAFÍA
                         archivo_subido_biblio = None
                         if "Bibliografía" in tipo_modulo:
                             st.markdown("---")
@@ -992,18 +990,35 @@ elif u["rol"] == "profesor":
             df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             for _, sec in df_secciones.iterrows():
                 st.divider()
-                st.markdown(f"### 📂 **{sec['titulo']}**")
+                col_s_tit, col_s_del_sec = st.columns([5, 1])
+                col_s_tit.markdown(f"### 📂 **{sec['titulo']}**")
+                if col_s_del_sec.button("🗑️ Borrar Unidad", key=f"del_sec_{sec['id']}"):
+                    c.execute("DELETE FROM actividades WHERE seccion_id = ?", (sec['id'],))
+                    c.execute("DELETE FROM secciones WHERE id = ?", (sec['id'],))
+                    conn.commit()
+                    st.rerun()
+
                 acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                 for _, a in acts.iterrows():
-                    with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
-                        st.write(a['descripcion'])
-                        if a['enlace_archivo']:
-                            if os.path.exists(str(a['enlace_archivo'])):
-                                nom_b = os.path.basename(str(a['enlace_archivo']))
-                                with open(a['enlace_archivo'], "rb") as fb_d:
-                                    st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_b})", data=fb_d.read(), file_name=nom_b, key=f"dl_bib_{a['id']}")
-                            else:
-                                renderizar_recurso_multimedia(a['enlace_archivo'])
+                    col_act_view, col_act_del = st.columns([5, 1])
+                    with col_act_view:
+                        with st.expander(f"{a['tipo']}: {a['titulo']} — Vence: {a['fecha_limite']}"):
+                            st.write(a['descripcion'])
+                            if a['enlace_archivo']:
+                                if os.path.exists(str(a['enlace_archivo'])):
+                                    nom_bf = os.path.basename(str(a['enlace_archivo']))
+                                    with open(a['enlace_archivo'], "rb") as fb_d:
+                                        st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_bf})", data=fb_d.read(), file_name=nom_bf, key=f"dl_bib_{a['id']}")
+                                else:
+                                    renderizar_recurso_multimedia(a['enlace_archivo'])
+                    with col_act_del:
+                        if st.button("🗑️ Borrar", key=f"del_act_{a['id']}"):
+                            c.execute("DELETE FROM foro_mensajes WHERE actividad_id = ?", (a['id'],))
+                            c.execute("DELETE FROM entregas WHERE actividad_id = ?", (a['id'],))
+                            c.execute("DELETE FROM actividades WHERE id = ?", (a['id'],))
+                            conn.commit()
+                            st.success("Eliminado.")
+                            st.rerun()
 
         # --- 2. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
@@ -1033,7 +1048,7 @@ elif u["rol"] == "profesor":
                 for _, al_row in df_matriculados.iterrows():
                     col_m1, col_m2 = st.columns([4, 1])
                     col_m1.markdown(f"👤 **{al_row['nombre']}** (`{al_row['email']}`)")
-                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}"):
+                    if col_m2.button("🗑️ Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
                         c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
                         conn.commit()
                         st.rerun()
