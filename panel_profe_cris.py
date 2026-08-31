@@ -118,7 +118,6 @@ st.markdown("""
     .msg-box-in { background-color: #f1f5f9; border-left: 4px solid #64748b; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
     .msg-box-out { background-color: #e0f2fe; border-left: 4px solid #0284c7; padding: 10px 14px; border-radius: 6px; margin-bottom: 8px; }
     
-    /* Detector IA Card */
     .ai-detector-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
@@ -128,7 +127,6 @@ st.markdown("""
         margin-bottom: 10px;
     }
     
-    /* Perfil Header */
     .user-profile-badge {
         display: flex;
         align-items: center;
@@ -356,7 +354,75 @@ def render_pie_chart_svg(data_dict):
     """
     return svg_html
 
-# --- FUNCIONES DE UTILIDAD Y IA ASISTENTE ---
+# --- FUNCIONES DE GENERACIÓN DE DOCUMENTOS (WORD Y PDF/HTML) ---
+def exportar_documento_word(titulo, contenido):
+    """Genera archivo .doc compatible con Microsoft Word y Google Docs con formato enriquecido"""
+    contenido_html = contenido.replace("\n", "<br>")
+    contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
+    contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
+    contenido_html = re.sub(r'# (.*?)(?:<br>|$)', r'<h1>\1</h1>', contenido_html)
+    contenido_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', contenido_html)
+    
+    html_doc = f"""<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+<head>
+<meta charset="utf-8">
+<title>{titulo}</title>
+<style>
+body {{ font-family: 'Calibri', 'Arial', sans-serif; line-height: 1.6; margin: 40px; color: #111827; }}
+h1 {{ color: #1d4ed8; font-size: 22pt; border-bottom: 2px solid #1d4ed8; padding-bottom: 8px; }}
+h2 {{ color: #1e3a8a; font-size: 16pt; margin-top: 18pt; }}
+h3 {{ color: #1e40af; font-size: 14pt; margin-top: 14pt; }}
+p, li {{ font-size: 11pt; text-align: justify; }}
+.footer {{ margin-top: 40pt; font-size: 9pt; color: #6b7280; border-top: 1px solid #cbd5e1; padding-top: 10px; }}
+</style>
+</head>
+<body>
+<h1>{titulo}</h1>
+<div>{contenido_html}</div>
+<div class="footer">Documento generado pedagógicamente por Plataforma Educativa — Tec. Cristian Nuñez</div>
+</body>
+</html>"""
+    return html_doc.encode('utf-8')
+
+def exportar_documento_pdf_imprimible(titulo, contenido):
+    """Genera archivo HTML con comandos de impresión para Guardar como PDF directamente en el navegador"""
+    contenido_html = contenido.replace("\n", "<br>")
+    contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
+    contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
+    contenido_html = re.sub(r'# (.*?)(?:<br>|$)', r'<h1>\1</h1>', contenido_html)
+    contenido_html = re.sub(r'\*\*(.*?)\*\*', r'<b>\1</b>', contenido_html)
+    
+    html_pdf = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>{titulo}</title>
+<style>
+@media print {{
+    @page {{ margin: 20mm; size: A4; }}
+    body {{ -webkit-print-color-adjust: exact; }}
+    .no-print {{ display: none; }}
+}}
+body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; margin: 30px auto; max-width: 800px; color: #0f172a; padding: 20px; }}
+h1 {{ color: #1d4ed8; font-size: 24px; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }}
+h2, h3 {{ color: #1e3a8a; margin-top: 20px; }}
+p, li {{ font-size: 14px; text-align: justify; }}
+.btn-print {{ background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer; margin-bottom: 20px; }}
+.footer {{ margin-top: 40px; font-size: 11px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 10px; }}
+</style>
+</head>
+<body>
+<div class="no-print" style="text-align: right;">
+    <button class="btn-print" onclick="window.print()">🖨️ Imprimir o Guardar como PDF</button>
+</div>
+<h1>{titulo}</h1>
+<div>{contenido_html}</div>
+<div class="footer">Plataforma Educativa • Documento Pedagógico Oficial</div>
+</body>
+</html>"""
+    return html_pdf.encode('utf-8')
+
+# --- FUNCIONES DE ASISTENTE IA Y DETECTOR ---
 def get_config(clave, default=""):
     r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
     return r[0] if r else default
@@ -366,7 +432,6 @@ def set_config(clave, valor):
     conn.commit()
 
 def analizar_antifraude_ia(texto, api_key=""):
-    """Analiza probabilidad de generación de IA y coincidencia web del texto entregado"""
     if not texto or len(texto.strip()) < 30:
         return {"pct_ia": 0, "pct_web": 0, "dictamen": "Texto muy breve para análisis.", "color": "#64748b"}
     
@@ -395,7 +460,6 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
         except Exception:
             pass
 
-    # Heurística de detección analítica basada en entropía y patrones sintácticos
     palabras = texto.lower().split()
     conectores_ia = ["en conclusión", "en resumen", "es fundamental destacar", "por lo tanto", "cabe mencionar", "es crucial", "en primer lugar", "a modo de síntesis", "en definitiva", "asimismo"]
     coincidencias = sum(1 for c in conectores_ia if c in texto.lower())
@@ -416,49 +480,99 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
 
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
-def generar_plan_clase_ia(tema, nivel, detalle_adicional="", api_key=""):
+def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", api_key=""):
+    """Genera recursos educativos amplios, detallados y estructurados"""
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
-        prompt = f"""Eres un profesor y pedagogo experto. Diseña una propuesta de clase completa, profesional y lista para el aula sobre:
-Tema: '{tema}'
-Nivel / Curso: '{nivel}'
-Detalles / Enfoque: '{detalle_adicional}'
+        
+        prompt = f"""Eres un pedagogo y profesor universitario experto. Diseña un documento educativo profesional, exhaustivo, con lenguaje académico claro y directamente utilizable en el aula.
 
-Estructura tu respuesta exactamente así:
-1. 🎯 Objetivos de Aprendizaje.
-2. ⏱️ Secuencia Didáctica (Inicio, Desarrollo y Cierre con tiempos).
-3. 📝 Consigna o Actividad de Trabajo Práctico.
-4. 💡 2 Preguntas Evaluativas sugeridas."""
+Tipo de recurso a elaborar: '{tipo_recurso}'
+Tema central: '{tema}'
+Nivel / Curso destinatario: '{nivel}'
+Especificaciones didácticas: '{detalle_adicional}'
+
+Instrucciones de formato y profundidad:
+- Desarrolla cada sección con amplitud teórica y ejemplos concretos.
+- Incluye fundamentación pedagógica, desglose temático detallado y criterios de evaluación.
+- Si es un Examen o Trabajo Práctico, incluye consignas claras y su respectiva clave de respuestas o rúbrica de corrección."""
         
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
         try:
-            with urllib.request.urlopen(req, timeout=12) as response:
+            with urllib.request.urlopen(req, timeout=15) as response:
                 res_data = json.loads(response.read().decode())
                 return res_data["candidates"][0]["content"]["parts"][0]["text"]
         except Exception:
             pass
 
-    return f"""### 📚 Propuesta de Clase: {tema}
-**Nivel / Destinatarios:** {nivel}
+    # Generador amplio integrado de respaldo
+    if tipo_recurso == "Trabajo Práctico con Consignas":
+        return f"""# 📝 Trabajo Práctico: {tema}
+**Materia / Curso:** {nivel}
 **Fecha:** {datetime.now().strftime('%d/%m/%Y')}
 
-#### 🎯 1. Objetivos Pedagógicos:
-1. Comprender los conceptos esenciales y el marco teórico de **{tema}**.
-2. Analizar críticamente situaciones concretas y vincular los contenidos con la realidad actual.
-3. Desarrollar habilidades de argumentación y trabajo colaborativo.
+---
 
-#### ⏱️ 2. Secuencia Didáctica de la Clase:
-- **Inicio (15 min):** Apertura mediante una pregunta disparadora sobre *{tema}*. Indagación de saberes previos y debate inicial.
-- **Desarrollo (45 min):** Exposición dialogada del docente, presentación de bibliografía y lectura compartida de fragmentos clave.
-- **Cierre (20 min):** Puesta en común de conclusiones, síntesis en el pizarrón y asignación de la consigna evaluativa.
+### 🎯 1. Fundamentación y Objetivos
+El presente trabajo práctico tiene como propósito que los estudiantes analicen en profundidad los conceptos esenciales de **{tema}**, fomentando el pensamiento crítico, la capacidad de síntesis y la aplicación empírica de los contenidos abordados.
 
-#### 📝 3. Consigna de Trabajo Práctico:
-Elaborar un informe breve analizando los ejes centrales de **{tema}**, incorporando un ejemplo real o caso práctico trabajado en clase.
+### 📖 2. Marco Conceptual y Lectura de Base
+{detalle_adicional if detalle_adicional else 'Se sugiere la lectura de la bibliografía de la unidad y el análisis de casos reales vinculados al sistema institucional y social.'}
 
-#### 💡 4. Preguntas Evaluativas Sugeridas:
-1. ¿Cuáles son los principios fundamentales que definen a {tema}?
-2. Explique cómo influyen estos conceptos en el contexto social o institucional."""
+### ✍️ 3. Consignas de Trabajo
+1. **Análisis Conceptual:** Defina los elementos estructurantes de {tema} y explique su relevancia en el marco de la materia.
+2. **Estudio de Caso / Ejemplificación:** Desarrolle un ejemplo práctico donde se evidencie la aplicación o problemática de {tema}.
+3. **Reflexión Crítica:** Elabore una conclusión argumentada sobre los desafíos contemporáneos en torno a este eje.
+
+### 📊 4. Criterios de Evaluación y Rúbrica
+- Precisión y coherencia conceptual (40%)
+- Capacidad de análisis y argumentación personal (30%)
+- Claridad en la redacción y presentación formal (30%)"""
+
+    elif tipo_recurso == "Examen Evaluativo con Respuestas":
+        return f"""# ⏱️ Evaluación Escrita: {tema}
+**Materia / Curso:** {nivel}
+**Tiempo Estimado:** 80 minutos
+
+---
+
+### 📋 Parte A: Preguntas de Desarrollo y Análisis (60%)
+1. Explique los fundamentos teóricos principales de **{tema}** y su vinculación con los contenidos del cuatrimestre.
+2. Compare dos posturas o perspectivas doctrinales/teóricas relativas a este núcleo temático.
+
+### 🔘 Parte B: Opción Múltiple y Razonamiento (40%)
+1. ¿Cuál es el objetivo principal que persigue la aplicación de {tema}?
+   - A) Regular exclusivamente aspectos procedimentales.
+   - B) Garantizar los principios rectores y derechos fundamentales. (Correcta)
+   - C) Delegar funciones operativas en entidades externas.
+
+---
+
+### 🔑 Clave de Corrección y Criterios para el Docente:
+- **Respuesta 1:** El alumno debe identificar correctamente los autores y marco normativo/teórico.
+- **Respuesta 2:** Se valorará la comparación analítica de ambas posturas doctrinarias."""
+
+    else:
+        return f"""# 📚 Planificación Didáctica Integral: {tema}
+**Nivel / Curso:** {nivel}
+**Fecha de Elaboración:** {datetime.now().strftime('%d/%m/%Y')}
+
+---
+
+### 🎯 1. Propósitos y Objetivos de Aprendizaje:
+- Comprender de forma analítica y sistemática los contenidos centrales de **{tema}**.
+- Relacionar los conceptos teóricos con situaciones reales y jurisprudenciales/prácticas.
+- Incentivar el debate argumentativo y la participación activa del estudiantado.
+
+### ⏱️ 2. Secuencia de la Clase (Estructura de 80 minutos):
+- **Apertura / Inicio (15 min):** Indagación de ideas previas mediante una pregunta disparadora y debate guiado.
+- **Desarrollo Teórico-Práctico (45 min):** Exposición del docente con apoyo audiovisual y lectura compartida de fragmentos clave.
+- **Cierre y Evaluación Formativa (20 min):** Elaboración de conclusiones grupales y asignación de actividades complementarias.
+
+### 📝 3. Recursos y Bibliografía:
+- Material de lectura obligatorio provisto en la plataforma.
+- Guía de preguntas de reflexión y estudio independiente."""
 
 def es_enlace_video(url):
     if not url:
@@ -572,7 +686,7 @@ if st.session_state.user is None:
                     st.error("Credenciales incorrectas (Profesor inicial: `profesor`/`1234`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL CON PERFIL DE USUARIO Y BOTÓN ASISTENTE IA FLOTANTE ---
+# --- ENCABEZADO GLOBAL CON PERFIL DE USUARIO Y ASISTENTE IA INTEGRADO ---
 u = st.session_state.user
 col_h1, col_h2, col_h3 = st.columns([2.5, 4, 5.5])
 with col_h1:
@@ -584,22 +698,61 @@ with col_h2:
     st.markdown(f"**🎓 Plataforma Educativa**<br><small style='color: #0369a1;'>Created by Tec. Cristian Nuñez</small>", unsafe_allow_html=True)
 
 with col_h3:
-    c_ia_btn, col_u_info, col_u_menu = st.columns([2, 3, 2])
+    c_ia_btn, col_u_info, col_u_menu = st.columns([2.2, 2.8, 2])
     
-    # Botón Flotante Asistente IA Docente
+    # Asistente IA Flotante Amplio con Descarga Word / PDF
     with c_ia_btn:
         if u["rol"] == "profesor":
             with st.popover("🤖 Asistente IA"):
-                st.markdown("##### 🤖 Asistente IA Pedagógico")
-                t_ia = st.text_input("Tema de clase / módulo:", placeholder="Ej: Poder Judicial y Garantías", key="tema_flotante_ia")
-                n_ia = st.text_input("Curso o nivel:", placeholder="Ej: 5° Año", key="nivel_flotante_ia")
-                e_ia = st.text_area("Enfoque o consignas deseadas:", key="enfoque_flotante_ia")
-                if st.button("✨ Generar Propuesta", key="btn_gen_flotante"):
+                st.markdown("#### 🤖 **Asistente Pedagógico IA**")
+                st.caption("Planificá clases, trabajos prácticos y exámenes con descarga en Word y PDF.")
+                
+                tipo_ia_sel = st.selectbox("¿Qué deseas generar?:", [
+                    "Planificación Completa de Clase",
+                    "Trabajo Práctico con Consignas",
+                    "Examen Evaluativo con Respuestas",
+                    "Material de Lectura Teórico"
+                ], key="tipo_ia_pop")
+                
+                t_ia = st.text_input("Tema o núcleo central:", placeholder="Ej: Poder Judicial y Garantías", key="tema_flotante_ia")
+                n_ia = st.text_input("Nivel / Curso:", placeholder="Ej: 5° Año - Secundaria", key="nivel_flotante_ia")
+                e_ia = st.text_area("Detalles / Enfoque pedagógico:", placeholder="Ej: Casos de estudio, jurisprudencia relevante, debate grupal...", key="enfoque_flotante_ia")
+                
+                if st.button("✨ Generar Documento con IA", key="btn_gen_flotante"):
                     if t_ia:
-                        with st.spinner("Diseñando plan..."):
+                        with st.spinner("Diseñando propuesta educativa detallada..."):
                             ck = get_config("gemini_api_key", "")
-                            res_flot = generar_plan_clase_ia(t_ia, n_ia, e_ia, ck)
-                            st.markdown(res_flot)
+                            res_flot = generar_recurso_pedagogico_ia(tipo_ia_sel, t_ia, n_ia, e_ia, ck)
+                            st.session_state["resultado_ia_flotante"] = res_flot
+                            st.session_state["titulo_ia_flotante"] = f"{tipo_ia_sel} - {t_ia}"
+
+                if "resultado_ia_flotante" in st.session_state:
+                    st.divider()
+                    st.markdown("##### 📄 Vista Previa:")
+                    st.markdown(st.session_state["resultado_ia_flotante"])
+                    
+                    tit_doc = st.session_state.get("titulo_ia_flotante", "Documento_Pedagogico")
+                    cont_doc = st.session_state["resultado_ia_flotante"]
+                    
+                    c_d1, c_d2 = st.columns(2)
+                    with c_d1:
+                        doc_word = exportar_documento_word(tit_doc, cont_doc)
+                        st.download_button(
+                            label="📥 Descargar Word (.doc)",
+                            data=doc_word,
+                            file_name=f"{tit_doc.replace(' ', '_')}.doc",
+                            mime="application/msword",
+                            key="btn_dl_word"
+                        )
+                    with c_d2:
+                        doc_pdf = exportar_documento_pdf_imprimible(tit_doc, cont_doc)
+                        st.download_button(
+                            label="📄 PDF / Imprimir (.html)",
+                            data=doc_pdf,
+                            file_name=f"{tit_doc.replace(' ', '_')}.html",
+                            mime="text/html",
+                            key="btn_dl_pdf"
+                        )
 
     with col_u_info:
         iniciales_u = "".join([p[0] for p in u['nombre'].split()[:2]]).upper()
@@ -666,7 +819,7 @@ st.divider()
 # ==============================================================================
 if u["rol"] == "profesor":
 
-    # DASHBOARD DE CURSOS (SOLO AQUÍ SE MUESTRA EL PANEL LATERAL)
+    # DASHBOARD DE CURSOS
     if st.session_state.materia_seleccionada_id is None:
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
