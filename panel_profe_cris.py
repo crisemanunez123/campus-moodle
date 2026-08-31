@@ -75,6 +75,7 @@ st.markdown("""
     }
     .q-correct { background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #155724 !important; }
     .q-wrong { background-color: #f8d7da; border-left: 5px solid #dc3545; padding: 10px; margin-bottom: 8px; border-radius: 4px; color: #721c24 !important; }
+    .task-response-box { background-color: #eef2f7; border-left: 4px solid #0f6cbf; padding: 12px; border-radius: 4px; margin-bottom: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -471,8 +472,8 @@ if u["rol"] == "profesor":
             st.markdown("### **Revisión Detallada de Exámenes y Devoluciones**")
             
             entregas_db = pd.read_sql("""
-                SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.preguntas_json,
-                       e.respuesta_data, e.nota, e.devolucion, e.tiempo_empleado_seg
+                SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
+                       e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega
                 FROM entregas e
                 JOIN actividades a ON e.actividad_id = a.id
                 JOIN usuarios u ON e.estudiante_id = u.id
@@ -482,10 +483,12 @@ if u["rol"] == "profesor":
             if not entregas_db.empty:
                 for _, ent in entregas_db.iterrows():
                     t_min = f" | ⏱️ Tiempo empleado: {round(ent['tiempo_empleado_seg']/60, 1)} min" if ent['tiempo_empleado_seg'] else ""
-                    with st.expander(f"📌 {ent['alumno']} - {ent['examen']} (Nota actual: {ent['nota']}{t_min})"):
+                    with st.expander(f"📌 {ent['alumno']} - {ent['examen']} ({ent['tipo_actividad']}) | Nota: {ent['nota']}{t_min}"):
+                        st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
                         
+                        # Si es Examen / Cuestionario
                         if ent['preguntas_json'] and ent['respuesta_data']:
-                            st.markdown("#### **Desglose de Respuestas:**")
+                            st.markdown("#### **Desglose de Preguntas:**")
                             try:
                                 preguntas = json.loads(ent['preguntas_json'])
                                 rtas_al = json.loads(ent['respuesta_data'])
@@ -509,15 +512,44 @@ if u["rol"] == "profesor":
                                         </div>
                                         """, unsafe_allow_html=True)
                             except Exception:
-                                st.write(f"Respuesta: {ent['respuesta_data']}")
+                                st.write(f"Respuestas: {ent['respuesta_data']}")
 
+                        # Si es Tarea (Texto o Archivo Adjunto)
+                        else:
+                            st.markdown("#### **Contenido Entregado por el Alumno:**")
+                            if ent['respuesta_data']:
+                                st.markdown(f"""
+                                <div class='task-response-box'>
+                                    <b>📝 Texto / Desarrollo enviado:</b><br>
+                                    {ent['respuesta_data']}
+                                </div>
+                                """, unsafe_allow_html=True)
+                            else:
+                                st.write("*(Sin texto desarrollado)*")
+
+                            # Botón para descargar o ver el archivo adjunto
+                            if ent['archivo_ruta'] and os.path.exists(ent['archivo_ruta']):
+                                nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
+                                with open(ent['archivo_ruta'], "rb") as f_adj:
+                                    st.download_button(
+                                        label=f"📥 Descargar Archivo Adjunto ({nombre_archivo_real})",
+                                        data=f_adj.read(),
+                                        file_name=nombre_archivo_real,
+                                        key=f"dl_{ent['entrega_id']}"
+                                    )
+                            elif ent['archivo_ruta']:
+                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}` (no encontrado en disco temporal).")
+                            else:
+                                st.info("El alumno no adjuntó archivos en esta entrega.")
+
+                        # Formulario para Calificar y Devolver
                         with st.form(f"form_corr_{ent['entrega_id']}"):
                             n_nueva = st.number_input("Calificación Final", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
                             dev_nueva = st.text_area("Devolución Pedagógica para el Alumno", value=ent['devolucion'] if ent['devolucion'] else "")
                             if st.form_submit_button("Guardar Calificación y Devolución"):
                                 c.execute("UPDATE entregas SET nota = ?, devolucion = ? WHERE id = ?", (n_nueva, dev_nueva, ent['entrega_id']))
                                 conn.commit()
-                                st.success("Calificación guardada.")
+                                st.success("Calificación guardada exitosamente.")
                                 st.rerun()
             else:
                 st.info("No hay exámenes o tareas entregadas pendientes de revisión.")
@@ -605,18 +637,18 @@ else:
                                         st.rerun()
                         else:
                             with st.form(f"form_tarea_{act['id']}"):
-                                rta_t = st.text_area("Desarrollo de la entrega")
-                                arch = st.file_uploader("Adjuntar archivo", type=["pdf", "docx", "zip"])
+                                rta_t = st.text_area("Desarrollo de la entrega (texto / informe)")
+                                arch = st.file_uploader("Adjuntar archivo (PDF, Word, etc.)", type=["pdf", "docx", "zip", "txt", "xlsx", "pptx"])
                                 if st.form_submit_button("Enviar Tarea"):
                                     r_path = None
-                                    if arch:
+                                    if arch is not None:
                                         r_path = os.path.join(CARPETA_ENTREGAS, f"{u['id']}_{act['id']}_{arch.name}")
                                         with open(r_path, "wb") as f:
                                             f.write(arch.getbuffer())
                                     c.execute("INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta) VALUES (?, ?, ?, ?, ?)",
                                               (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_t, r_path))
                                     conn.commit()
-                                    st.success("Tarea enviada.")
+                                    st.success("Tarea enviada correctamente.")
                                     st.rerun()
 
     with tab_al_notas:
