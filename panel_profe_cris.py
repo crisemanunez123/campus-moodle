@@ -345,7 +345,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- ASEGURAR USUARIO ADMINISTRADOR GENERAL ('cristian') ---
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
 admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
 if not admin_check:
     c.execute("""
@@ -1036,10 +1036,10 @@ elif u["rol"] == "profesor":
                             st.success("Eliminado.")
                             st.rerun()
 
-        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (NUEVA SOLAPA DEDICADA) ---
+        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (AUDITORÍA AUTOMÁTICA DE IA Y PLAGIO) ---
         with tab_correccion:
             st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
-            st.caption("Revisá las entregas de los estudiantes, visualizá los porcentajes de autoría y volcá las calificaciones directamente a la planilla central.")
+            st.caption("Revisá las entregas de los estudiantes, visualizá los porcentajes automáticos de autoría y volcá las calificaciones a la planilla central.")
             
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as actividad_titulo, a.tipo as tipo_actividad, a.preguntas_json,
@@ -1158,18 +1158,47 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.rerun()
 
-        # --- 4. PESTAÑA CALIFICACIONES ---
+        # --- 4. PESTAÑA CALIFICACIONES (PLANILLA CENTRAL CON NOTAS DE TRABAJOS Y PERÍODOS) ---
         with tab_calificaciones:
-            st.markdown("### 📋 **Calificaciones y Períodos**")
+            st.markdown("### 📋 **Planilla Central de Calificaciones**")
+            
             alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
-            if not alumnos_curso.empty:
-                tabla_p = []
+            
+            if alumnos_curso.empty:
+                st.info("No hay alumnos matriculados en esta cátedra.")
+            else:
+                # Obtener todas las actividades evaluativas de la materia
+                acts_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(cat_id,))
+                
+                tabla_calif_central = []
                 for _, al in alumnos_curso.iterrows():
-                    per = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()
-                    tabla_p.append({"Estudiante": al['nombre'], "1° Inf": per[0] if per else "-", "1° Cuat": per[1] if per else "-", "2° Inf": per[2] if per else "-", "2° Cuat": per[3] if per else "-", "Final": per[4] if per else "-"})
-                st.dataframe(pd.DataFrame(tabla_p), use_container_width=True, hide_index=True)
+                    fila = {"Estudiante": al['nombre']}
+                    
+                    # Notas de actividades corregidas
+                    notas_parciales = []
+                    for _, act in acts_eval.iterrows():
+                        res_nt = c.execute("SELECT nota FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (act['id'], al['id'])).fetchone()
+                        if res_nt and res_nt[0] is not None:
+                            fila[act['titulo']] = f"{res_nt[0]:.2f}"
+                            notas_parciales.append(res_nt[0])
+                        else:
+                            fila[act['titulo']] = "-"
+                    
+                    fila["Promedio Trabajos"] = f"{(sum(notas_parciales)/len(notas_parciales)):.2f}" if notas_parciales else "-"
 
-                with st.expander("📝 Cargar / Modificar Informes (TEA, TEP, TED)"):
+                    # Períodos
+                    per = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()
+                    fila["1° Inf"] = per[0] if per else "-"
+                    fila["1° Cuat"] = f"{per[1]:.2f}" if per and per[1] is not None else "-"
+                    fila["2° Inf"] = per[2] if per else "-"
+                    fila["2° Cuat"] = f"{per[3]:.2f}" if per and per[3] is not None else "-"
+                    fila["Final Dic"] = f"{per[4]:.2f}" if per and per[4] is not None else "-"
+
+                    tabla_calif_central.append(fila)
+
+                st.dataframe(pd.DataFrame(tabla_calif_central), use_container_width=True, hide_index=True)
+
+                with st.expander("📝 Cargar / Modificar Informes Oficiales (TEA, TEP, TED)"):
                     map_al_cal = {r['nombre']: r['id'] for _, r in alumnos_curso.iterrows()}
                     sel_al_cal = st.selectbox("Alumno:", list(map_al_cal.keys()), key=f"sel_al_cal_{cat_id}")
                     al_cal_id = map_al_cal[sel_al_cal]
