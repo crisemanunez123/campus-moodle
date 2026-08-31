@@ -143,7 +143,6 @@ CREATE TABLE IF NOT EXISTS catedras (
 )
 """)
 
-# Migración para curso_anio y escuela
 try:
     cols_cat = [col[1] for col in c.execute("PRAGMA table_info(catedras)").fetchall()]
     if "curso_anio" not in cols_cat:
@@ -295,7 +294,7 @@ def renderizar_recurso_multimedia(enlace):
         except Exception:
             st.markdown(f"🔗 **Enlace del video:** [{enlace_limpio}]({enlace_limpio})")
     else:
-        st.markdown(f"🔗 **Enlace adjunto:** [{enlace_limpio}]({enlace_limpio})")
+        st.markdown(f"🔗 **Enlace / Documento:** [{enlace_limpio}]({enlace_limpio})")
 
 def enviar_credenciales_alumno(destinatario, nombre_alumno, curso_nombre, usuario, clave):
     remitente = get_config("smtp_email", "")
@@ -529,7 +528,7 @@ if u["rol"] == "profesor":
             "📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia", "✉️ Mensajes Privados"
         ])
 
-        # --- 1. PESTAÑA CURSO ---
+        # --- 1. PESTAÑA CURSO (CON RECURSO 'BIBLIOGRAFÍA') ---
         with tab_curso:
             col_sec1, col_sec2 = st.columns([3, 1])
             with col_sec2:
@@ -549,20 +548,23 @@ if u["rol"] == "profesor":
                     st.warning("Primero creá al menos una sección arriba para añadir actividades.")
                 else:
                     tipo_modulo = st.selectbox("Tipo de recurso:", [
+                        "📚 Bibliografía (Material de lectura / Video / Enlace)",
                         "💬 Foro (Debate e Interacción)",
                         "⏱️ Cuestionario / Examen Dinámico por Tiempo",
-                        "📝 Tarea (Entrega de Archivo/Texto)",
-                        "📁 Archivo / URL / Video"
+                        "📝 Tarea (Entrega de Archivo/Texto)"
                     ])
                     sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()))
 
-                    tit_act = st.text_input("Título de la actividad / foro / examen / video", placeholder="Ej: Foro de Debate / Examen Parcial")
-                    desc_act = st.text_area("Descripción / Consigna general", placeholder="Instrucciones para los participantes...")
-                    f_lim = st.date_input("Fecha Límite", min_value=date.today())
+                    tit_act = st.text_input("Título de la actividad / bibliografía / foro / examen", placeholder="Ej: Material de lectura: Ley 24.521 / Examen Parcial")
+                    desc_act = st.text_area("Descripción / Consigna / Referencia bibliográfica", placeholder="Detalles, páginas a leer o instrucciones...")
+                    f_lim = st.date_input("Fecha Límite / Fecha de clase", min_value=date.today())
 
                     es_obligatorio_val = 0
-                    if "Foro" in tipo_modulo:
+                    if "Bibliografía" in tipo_modulo:
+                        caracter_biblio = st.radio("Carácter de la Bibliografía:", ["Bibliografía Obligatoria", "Bibliografía Optativa / Complementaria"], horizontal=True)
+                        es_obligatorio_val = 1 if caracter_biblio == "Bibliografía Obligatoria" else 0
+                    elif "Foro" in tipo_modulo:
                         es_obligatorio_val = 1 if st.checkbox("📌 ¿Este foro es evaluativo y obligatorio? (Se sumará al Libro de Calificaciones)", value=False) else 0
 
                     dur_min = 0
@@ -629,20 +631,20 @@ if u["rol"] == "profesor":
                                             "distractores": lista_distr
                                         })
 
-                    enlace_url = st.text_input("Enlace web / URL de Video (YouTube, Vimeo, MP4, etc.)", placeholder="https://www.youtube.com/watch?v=...")
+                    enlace_url = st.text_input("Enlace web / URL de Video / Archivo en la nube (opcional)", placeholder="https://www.youtube.com/watch?v=... o link a PDF")
 
-                    if st.button("🚀 Publicar Actividad / Recurso en el Curso"):
+                    if st.button("🚀 Publicar Recurso en el Curso"):
                         if not tit_act.strip():
-                            st.error("Por favor completá el título de la actividad.")
+                            st.error("Por favor completá el título de la actividad o bibliografía.")
                         else:
-                            if "Foro" in tipo_modulo:
+                            if "Bibliografía" in tipo_modulo:
+                                tipo_db = "Bibliografía"
+                            elif "Foro" in tipo_modulo:
                                 tipo_db = "Foro"
                             elif "Examen" in tipo_modulo:
                                 tipo_db = "Cuestionario"
-                            elif "Tarea" in tipo_modulo:
-                                tipo_db = "Tarea"
                             else:
-                                tipo_db = "Archivo"
+                                tipo_db = "Tarea"
 
                             json_str = json.dumps(preguntas_generadas, ensure_ascii=False) if tipo_db == "Cuestionario" else None
                             
@@ -689,19 +691,30 @@ if u["rol"] == "profesor":
                     # ACTIVIDADES CON FORMATO PLEGABLE
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
-                        st.caption("No hay actividades cargadas en esta sección.")
+                        st.caption("No hay contenidos cargados en esta sección.")
                     else:
                         for _, a in acts.iterrows():
                             col_act_main, col_act_edit, col_act_del = st.columns([5, 1.2, 1])
                             
-                            ico = "💬" if a['tipo'] == 'Foro' else ("⏱️" if a['tipo'] == 'Cuestionario' else ("📄" if a['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(a['enlace_archivo']) else "🔗")))
+                            if a['tipo'] == 'Bibliografía':
+                                ico = "📚" if a['es_obligatorio'] == 1 else "📖"
+                                tag_tipo = "Bibliografía Obligatoria" if a['es_obligatorio'] == 1 else "Bibliografía Optativa"
+                            elif a['tipo'] == 'Foro':
+                                ico = "💬"
+                                tag_tipo = "Foro Evaluativo" if a['es_obligatorio'] == 1 else "Foro"
+                            elif a['tipo'] == 'Cuestionario':
+                                ico = "⏱️"
+                                tag_tipo = "Examen"
+                            else:
+                                ico = "📝"
+                                tag_tipo = "Tarea"
+
                             t_lbl = f" | ⏳ {a['duracion_minutos']} min" if a['duracion_minutos'] > 0 else ""
-                            tag_eval = " [Evaluativo]" if (a['tipo'] == 'Foro' and a['es_obligatorio'] == 1) else ""
                             
                             with col_act_main:
-                                with st.expander(f"{ico} {a['titulo']} ({a['tipo']}{tag_eval}){t_lbl} — Vence: {a['fecha_limite']}"):
+                                with st.expander(f"{ico} {a['titulo']} ({tag_tipo}){t_lbl} — Vence / Fecha: {a['fecha_limite']}"):
                                     if a['descripcion']:
-                                        st.markdown(f"**📌 Consigna / Descripción:**")
+                                        st.markdown(f"**📌 Contenido / Consigna:**")
                                         st.markdown(a['descripcion'])
                                     else:
                                         st.caption("*(Sin descripción consignada)*")
@@ -750,7 +763,7 @@ if u["rol"] == "profesor":
                             with col_act_edit:
                                 with st.popover("✏️ Editar", key=f"pop_act_edit_{a['id']}"):
                                     with st.form(f"form_edit_act_{a['id']}"):
-                                        st.markdown(f"##### Modificar Actividad: {a['titulo']}")
+                                        st.markdown(f"##### Modificar Recurso: {a['titulo']}")
                                         n_tit_act = st.text_input("Título", value=a['titulo'])
                                         n_desc_act = st.text_area("Descripción / Consigna", value=a['descripcion'] if a['descripcion'] else "")
                                         
@@ -758,10 +771,13 @@ if u["rol"] == "profesor":
                                             fecha_actual = datetime.strptime(a['fecha_limite'], "%Y-%m-%d").date()
                                         except Exception:
                                             fecha_actual = date.today()
-                                        n_f_lim = st.date_input("Fecha Límite", value=fecha_actual)
+                                        n_f_lim = st.date_input("Fecha Límite / Fecha", value=fecha_actual)
                                         
                                         n_es_ob = a['es_obligatorio']
-                                        if a['tipo'] == "Foro":
+                                        if a['tipo'] == "Bibliografía":
+                                            sel_b_ob = st.radio("Carácter:", ["Bibliografía Obligatoria", "Bibliografía Optativa / Complementaria"], index=0 if a['es_obligatorio'] == 1 else 1)
+                                            n_es_ob = 1 if sel_b_ob == "Bibliografía Obligatoria" else 0
+                                        elif a['tipo'] == "Foro":
                                             n_es_ob = 1 if st.checkbox("¿Es foro obligatorio/evaluativo?", value=(a['es_obligatorio'] == 1)) else 0
 
                                         n_dur = a['duracion_minutos']
@@ -785,19 +801,19 @@ if u["rol"] == "profesor":
                                                 WHERE id = ?
                                             """, (sec_opts[n_sec_elegida], n_tit_act.strip(), n_desc_act, str(n_f_lim), n_dur, n_preg_json, n_enlace, n_es_ob, a['id']))
                                             conn.commit()
-                                            st.success("Actividad modificada exitosamente.")
+                                            st.success("Modificación guardada exitosamente.")
                                             st.rerun()
 
                             with col_act_del:
-                                if st.button("🗑️", key=f"del_act_{a['id']}", help="Eliminar actividad"):
+                                if st.button("🗑️", key=f"del_act_{a['id']}", help="Eliminar recurso"):
                                     c.execute("DELETE FROM foro_mensajes WHERE actividad_id = ?", (a['id'],))
                                     c.execute("DELETE FROM entregas WHERE actividad_id = ?", (a['id'],))
                                     c.execute("DELETE FROM actividades WHERE id = ?", (a['id'],))
                                     conn.commit()
-                                    st.success("Actividad eliminada.")
+                                    st.success("Recurso eliminado.")
                                     st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES (CON MENSAJE PRIVADO, EDICIÓN Y BAJA) ---
+        # --- 2. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -1246,11 +1262,29 @@ else:
             acts_al = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(s['id'],))
             
             for _, act in acts_al.iterrows():
-                ico = "💬" if act['tipo'] == 'Foro' else ("⏱️" if act['tipo'] == 'Cuestionario' else ("📄" if act['tipo'] == 'Tarea' else ("🎬" if es_enlace_video(act['enlace_archivo']) else "🔗")))
-                tag_ob = " [Evaluativo]" if (act['tipo'] == 'Foro' and act['es_obligatorio'] == 1) else ""
+                if act['tipo'] == 'Bibliografía':
+                    ico = "📚" if act['es_obligatorio'] == 1 else "📖"
+                    tag_tipo = "Bibliografía Obligatoria" if act['es_obligatorio'] == 1 else "Bibliografía Optativa"
+                elif act['tipo'] == 'Foro':
+                    ico = "💬"
+                    tag_tipo = "Foro Evaluativo" if act['es_obligatorio'] == 1 else "Foro"
+                elif act['tipo'] == 'Cuestionario':
+                    ico = "⏱️"
+                    tag_tipo = "Examen"
+                else:
+                    ico = "📝"
+                    tag_tipo = "Tarea"
                 
-                if act['tipo'] == "Foro":
-                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}{tag_ob}) — Vence: {act['fecha_limite']}"):
+                if act['tipo'] == "Bibliografía":
+                    with st.expander(f"{ico} {act['titulo']} ({tag_tipo}) — Fecha: {act['fecha_limite']}"):
+                        if act['descripcion']:
+                            st.markdown(f"**📌 Contenido / Referencia:**")
+                            st.write(act['descripcion'])
+                        if act['enlace_archivo']:
+                            renderizar_recurso_multimedia(act['enlace_archivo'])
+
+                elif act['tipo'] == "Foro":
+                    with st.expander(f"{ico} {act['titulo']} ({tag_tipo}) — Vence: {act['fecha_limite']}"):
                         st.markdown(f"**📌 Tema de debate / Consigna:**")
                         st.write(act['descripcion'])
                         
@@ -1298,7 +1332,7 @@ else:
                     ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
                     ya_rendido = not ent_al.empty
                     
-                    with st.expander(f"{ico} {act['titulo']} ({act['tipo']}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
+                    with st.expander(f"{ico} {act['titulo']} ({tag_tipo}) | {'✅ Completado' if ya_rendido else '⏳ Pendiente'}"):
                         st.write(f"**Consigna:** {act['descripcion']}")
                         
                         if act['enlace_archivo']:
