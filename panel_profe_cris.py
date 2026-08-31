@@ -187,6 +187,19 @@ CREATE TABLE IF NOT EXISTS entregas (
 """)
 
 c.execute("""
+CREATE TABLE IF NOT EXISTS asistencias (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    catedra_id INTEGER,
+    estudiante_id INTEGER,
+    fecha TEXT,
+    estado TEXT,
+    UNIQUE(catedra_id, estudiante_id, fecha),
+    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
+    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+)
+""")
+
+c.execute("""
 CREATE TABLE IF NOT EXISTS configuracion (
     clave TEXT PRIMARY KEY,
     valor TEXT
@@ -419,9 +432,9 @@ if u["rol"] == "profesor":
             st.session_state.materia_seleccionada_id = None
             st.rerun()
 
-        st.markdown(f"## **{nombre_materia}**")
+        st.subheader(f"🏛️ {nombre_materia}")
 
-        tab_curso, tab_participantes, tab_calificaciones = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones"])
+        tab_curso, tab_participantes, tab_calificaciones, tab_asistencia = st.tabs(["📘 Curso", "👥 Participantes", "📈 Calificaciones", "📋 Asistencia"])
 
         # --- 1. PESTAÑA CURSO (GESTIÓN Y EDICIÓN INTEGRAL) ---
         with tab_curso:
@@ -480,7 +493,6 @@ if u["rol"] == "profesor":
                             st.success("Actividad publicada.")
                             st.rerun()
 
-            # LISTA DE SECCIONES CON EDICIÓN COMPLETA (NOMBRE, ORDEN, ELIMINAR)
             df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
             if df_secciones.empty:
                 st.info("No hay secciones creadas en este curso. Usa el botón '➕ Añadir Nueva Sección / Unidad' arriba.")
@@ -510,7 +522,6 @@ if u["rol"] == "profesor":
                             conn.commit()
                             st.rerun()
 
-                    # ACTIVIDADES DENTRO DE LA SECCIÓN (CON EDICIÓN Y BORRADO INDIVIDUAL)
                     acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
                     if acts.empty:
                         st.caption("No hay actividades cargadas en esta sección.")
@@ -533,14 +544,12 @@ if u["rol"] == "profesor":
                                         n_tit_act = st.text_input("Título", value=a['titulo'])
                                         n_desc_act = st.text_area("Descripción / Consigna", value=a['descripcion'] if a['descripcion'] else "")
                                         
-                                        # Fecha Límite
                                         try:
                                             fecha_actual = datetime.strptime(a['fecha_limite'], "%Y-%m-%d").date()
                                         except Exception:
                                             fecha_actual = date.today()
                                         n_f_lim = st.date_input("Fecha Límite", value=fecha_actual)
                                         
-                                        # Duración si es cuestionario
                                         n_dur = a['duracion_minutos']
                                         n_preg_json = a['preguntas_json']
                                         if a['tipo'] == "Cuestionario":
@@ -550,7 +559,6 @@ if u["rol"] == "profesor":
 
                                         n_enlace = st.text_input("Enlace URL / Archivo", value=a['enlace_archivo'] if a['enlace_archivo'] else "")
 
-                                        # Posibilidad de mover a otra sección
                                         sec_opts = {r['titulo']: r['id'] for _, r in df_secciones.iterrows()}
                                         sec_actual_nom = [k for k, v in sec_opts.items() if v == a['seccion_id']]
                                         idx_default = list(sec_opts.keys()).index(sec_actual_nom[0]) if sec_actual_nom else 0
@@ -574,7 +582,7 @@ if u["rol"] == "profesor":
                                     st.success("Actividad eliminada.")
                                     st.rerun()
 
-        # --- 2. PESTAÑA PARTICIPANTES (CON ENVÍO DE EMAIL AL REGISTRAR) ---
+        # --- 2. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
             st.markdown("### **Matriculación de Alumnos**")
             col_m1, col_m2 = st.columns([1, 1])
@@ -697,7 +705,6 @@ if u["rol"] == "profesor":
                     with st.expander(f"📌 {ent['alumno']} - {ent['examen']} ({ent['tipo_actividad']}) | Nota: {ent['nota']}{t_min}"):
                         st.caption(f"📅 **Fecha de Entrega:** {ent['fecha_entrega']}")
                         
-                        # Si es Examen / Cuestionario
                         if ent['preguntas_json'] and ent['respuesta_data']:
                             st.markdown("#### **Desglose de Preguntas:**")
                             try:
@@ -725,7 +732,6 @@ if u["rol"] == "profesor":
                             except Exception:
                                 st.write(f"Respuestas: {ent['respuesta_data']}")
 
-                        # Si es Tarea (Texto o Archivo Adjunto)
                         else:
                             st.markdown("#### **Contenido Entregado por el Alumno:**")
                             if ent['respuesta_data']:
@@ -738,7 +744,6 @@ if u["rol"] == "profesor":
                             else:
                                 st.write("*(Sin texto desarrollado)*")
 
-                            # Botón de Descarga del Archivo Adjunto
                             if ent['archivo_ruta'] and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
                                 with open(ent['archivo_ruta'], "rb") as f_adj:
@@ -753,7 +758,6 @@ if u["rol"] == "profesor":
                             else:
                                 st.info("El alumno no adjuntó archivos en esta entrega.")
 
-                        # Formulario para Calificar y Devolver
                         with st.form(f"form_corr_{ent['entrega_id']}"):
                             n_nueva = st.number_input("Calificación Final", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
                             dev_nueva = st.text_area("Devolución Pedagógica para el Alumno", value=ent['devolucion'] if ent['devolucion'] else "")
@@ -764,6 +768,83 @@ if u["rol"] == "profesor":
                                 st.rerun()
             else:
                 st.info("No hay exámenes o tareas entregadas pendientes de revisión.")
+
+        # --- 4. PESTAÑA ASISTENCIA (NUEVA) ---
+        with tab_asistencia:
+            st.markdown("### **Control y Registro de Asistencia**")
+            
+            alumnos_asist = pd.read_sql("""
+                SELECT u.id, u.nombre, u.email 
+                FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id 
+                WHERE m.catedra_id = ? ORDER BY u.nombre ASC
+            """, conn, params=(cat_id,))
+
+            if alumnos_asist.empty:
+                st.info("No hay alumnos matriculados en esta materia para registrar asistencia.")
+            else:
+                col_f1, col_f2 = st.columns([2, 4])
+                with col_f1:
+                    fecha_sel = st.date_input("📅 Seleccionar Fecha de Clase:", value=date.today(), key="asist_fecha_sel")
+                    fecha_str = str(fecha_sel)
+
+                st.markdown(f"#### 📝 Tomar Asistencia para el día: **{fecha_str}**")
+
+                with st.form(f"form_tomar_asistencia_{fecha_str}"):
+                    estados_form = {}
+                    cols_asist = st.columns([3, 2, 2])
+                    cols_asist[0].markdown("**Alumno**")
+                    cols_asist[1].markdown("**Email**")
+                    cols_asist[2].markdown("**Estado**")
+
+                    for _, al in alumnos_asist.iterrows():
+                        reg_previo = c.execute("SELECT estado FROM asistencias WHERE catedra_id = ? AND estudiante_id = ? AND fecha = ?", (cat_id, al['id'], fecha_str)).fetchone()
+                        val_defecto = reg_previo[0] if reg_previo else "Presente"
+                        
+                        c_a, c_b, c_c = st.columns([3, 2, 2])
+                        c_a.write(f"👤 {al['nombre']}")
+                        c_b.caption(al['email'])
+                        estados_form[al['id']] = c_c.radio(
+                            "Estado",
+                            options=["Presente", "Ausente"],
+                            index=0 if val_defecto == "Presente" else 1,
+                            horizontal=True,
+                            key=f"asist_{al['id']}_{fecha_str}",
+                            label_visibility="collapsed"
+                        )
+
+                    if st.form_submit_button("💾 Guardar Asistencia de la Fecha"):
+                        for al_id, est in estados_form.items():
+                            c.execute("""
+                                INSERT INTO asistencias (catedra_id, estudiante_id, fecha, estado)
+                                VALUES (?, ?, ?, ?)
+                                ON CONFLICT(catedra_id, estudiante_id, fecha) 
+                                DO UPDATE SET estado = excluded.estado
+                            """, (cat_id, al_id, fecha_str, est))
+                        conn.commit()
+                        st.success(f"Asistencia guardada con éxito para la fecha {fecha_str}.")
+                        st.rerun()
+
+                st.divider()
+                st.markdown("### 📊 **Estadísticas Generales y Porcentaje de Asistencia**")
+                
+                resumen_asist = []
+                for _, al in alumnos_asist.iterrows():
+                    total_clases = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()[0]
+                    total_presentes = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ? AND estado = 'Presente'", (cat_id, al['id'])).fetchone()[0]
+                    total_ausentes = total_clases - total_presentes
+                    pct = round((total_presentes / total_clases) * 100, 1) if total_clases > 0 else 0.0
+
+                    resumen_asist.append({
+                        "Estudiante": al['nombre'],
+                        "Email": al['email'],
+                        "Clases Registradas": total_clases,
+                        "Presentes": total_presentes,
+                        "Ausentes": total_ausentes,
+                        "% Asistencia": f"{pct}%"
+                    })
+
+                df_asist_resumen = pd.DataFrame(resumen_asist)
+                st.dataframe(df_asist_resumen, use_container_width=True, hide_index=True)
 
 # ==============================================================================
 # 🎓 VISTA ESTUDIANTE
@@ -785,7 +866,7 @@ else:
     sel_mat_al = st.selectbox("Seleccionar Curso:", list(mat_map.keys()))
     materia_id = mat_map[sel_mat_al]
 
-    tab_al_curso, tab_al_notas = st.tabs(["📘 Curso y Evaluaciones", "📊 Mis Calificaciones"])
+    tab_al_curso, tab_al_notas, tab_al_asist = st.tabs(["📘 Curso y Evaluaciones", "📊 Mis Calificaciones", "📋 Mi Asistencia"])
 
     with tab_al_curso:
         df_sec_al = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(materia_id,))
@@ -871,3 +952,26 @@ else:
             WHERE a.catedra_id = ?
         """, conn, params=(u['id'], materia_id))
         st.dataframe(df_notas_al, use_container_width=True, hide_index=True)
+
+    with tab_al_asist:
+        st.markdown("### **Mi Registro de Asistencia**")
+        df_mis_asist = pd.read_sql("""
+            SELECT fecha as 'Fecha de Clase', estado as 'Estado'
+            FROM asistencias 
+            WHERE catedra_id = ? AND estudiante_id = ?
+            ORDER BY fecha DESC
+        """, conn, params=(materia_id, u['id']))
+
+        if df_mis_asist.empty:
+            st.info("No hay registros de asistencia en esta materia todavía.")
+        else:
+            total = len(df_mis_asist)
+            presentes = len(df_mis_asist[df_mis_asist['Estado'] == 'Presente'])
+            porcentaje = round((presentes / total) * 100, 1)
+            
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Total Clases", total)
+            c2.metric("Clases Presente", presentes)
+            c3.metric("% Asistencia", f"{porcentaje}%")
+            
+            st.dataframe(df_mis_asist, use_container_width=True, hide_index=True)
