@@ -121,10 +121,11 @@ st.markdown("""
     .ai-detector-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
-        padding: 12px 16px;
+        padding: 14px 18px;
         border-radius: 8px;
-        margin-top: 10px;
-        margin-bottom: 10px;
+        margin-top: 12px;
+        margin-bottom: 14px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
     
     .user-profile-badge {
@@ -354,9 +355,8 @@ def render_pie_chart_svg(data_dict):
     """
     return svg_html
 
-# --- FUNCIONES DE GENERACIÓN DE DOCUMENTOS (WORD Y PDF/HTML) ---
+# --- FUNCIONES DE GENERACIÓN DE DOCUMENTOS (WORD Y PDF) ---
 def exportar_documento_word(titulo, contenido):
-    """Genera archivo .doc compatible con Microsoft Word y Google Docs con formato enriquecido"""
     contenido_html = contenido.replace("\n", "<br>")
     contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
     contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
@@ -385,7 +385,6 @@ p, li {{ font-size: 11pt; text-align: justify; }}
     return html_doc.encode('utf-8')
 
 def exportar_documento_pdf_imprimible(titulo, contenido):
-    """Genera archivo HTML con comandos de impresión para Guardar como PDF directamente en el navegador"""
     contenido_html = contenido.replace("\n", "<br>")
     contenido_html = re.sub(r'### (.*?)(?:<br>|$)', r'<h3>\1</h3>', contenido_html)
     contenido_html = re.sub(r'## (.*?)(?:<br>|$)', r'<h2>\1</h2>', contenido_html)
@@ -431,18 +430,30 @@ def set_config(clave, valor):
     c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
     conn.commit()
 
+def extraer_texto_archivo_entrega(ruta_archivo):
+    """Extrae texto legible de un archivo entregado para su auditoría"""
+    if not ruta_archivo or not os.path.exists(ruta_archivo):
+        return ""
+    try:
+        with open(ruta_archivo, "r", encoding="utf-8", errors="ignore") as f:
+            contenido = f.read()
+        limpio = "".join([c for c in contenido if c.isprintable() or c in "\n\t "])
+        return limpio[:3000]
+    except Exception:
+        return ""
+
 def analizar_antifraude_ia(texto, api_key=""):
-    if not texto or len(texto.strip()) < 30:
-        return {"pct_ia": 0, "pct_web": 0, "dictamen": "Texto muy breve para análisis.", "color": "#64748b"}
+    if not texto or len(texto.strip()) < 15:
+        return {"pct_ia": 0, "pct_web": 0, "dictamen": "Texto o documento con contenido breve para contraste estadístico.", "color": "#64748b"}
     
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
         prompt = f"""Eres un auditor académico experto en detección de plagio e inteligencia artificial.
-Analiza este texto entregado por un estudiante:
-\"\"\"{texto}\"\"\"
+Analiza este texto o extracto de trabajo entregado por un estudiante:
+\"\"\"{texto[:2000]}\"\"\"
 
 Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
-{{"pct_ia": <numero del 0 al 100>, "pct_web": <numero del 0 al 100>, "analisis": "<resumen breve en 1 renglon>"}}"""
+{{"pct_ia": <numero del 0 al 100>, "pct_web": <numero del 0 al 100>, "analisis": "<resumen breve de 1 linea del dictamen>"}}"""
         
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
@@ -461,12 +472,12 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
             pass
 
     palabras = texto.lower().split()
-    conectores_ia = ["en conclusión", "en resumen", "es fundamental destacar", "por lo tanto", "cabe mencionar", "es crucial", "en primer lugar", "a modo de síntesis", "en definitiva", "asimismo"]
+    conectores_ia = ["en conclusión", "en resumen", "es fundamental destacar", "por lo tanto", "cabe mencionar", "es crucial", "en primer lugar", "a modo de síntesis", "en definitiva", "asimismo", "dictamen", "conforme", "objeto"]
     coincidencias = sum(1 for c in conectores_ia if c in texto.lower())
     
     long_prom = sum(len(w) for w in palabras) / len(palabras) if palabras else 5
-    pct_ia = min(95, max(5, int((coincidencias * 18) + (long_prom * 4))))
-    pct_web = min(90, max(8, int((len(palabras) % 35) + 15 + coincidencias * 10)))
+    pct_ia = min(95, max(4, int((coincidencias * 14) + (long_prom * 3))))
+    pct_web = min(90, max(6, int((len(palabras) % 30) + 12 + coincidencias * 8)))
     
     if pct_ia >= 70 or pct_web >= 60:
         dictamen = "Alta probabilidad de asistencia por IA y estructura sintética típica de modelos generativos."
@@ -481,10 +492,8 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
 def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", api_key=""):
-    """Genera recursos educativos amplios, detallados y estructurados"""
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
-        
         prompt = f"""Eres un pedagogo y profesor universitario experto. Diseña un documento educativo profesional, exhaustivo, con lenguaje académico claro y directamente utilizable en el aula.
 
 Tipo de recurso a elaborar: '{tipo_recurso}'
@@ -506,7 +515,6 @@ Instrucciones de formato y profundidad:
         except Exception:
             pass
 
-    # Generador amplio integrado de respaldo
     if tipo_recurso == "Trabajo Práctico con Consignas":
         return f"""# 📝 Trabajo Práctico: {tema}
 **Materia / Curso:** {nivel}
@@ -824,12 +832,12 @@ if u["rol"] == "profesor":
         
         st.sidebar.markdown("### 🏛️ Administración Docente")
         
-        with st.sidebar.expander("🤖 Configuración de Asistente IA (Gemini)"):
+        with st.sidebar.expander("🤖 Configuración de Asistente IA"):
             gemini_act = get_config("gemini_api_key", "")
-            gemini_in = st.text_input("API Key de Google Gemini:", value=gemini_act, type="password", help="Obtené tu clave gratuita en aistudio.google.com")
-            if st.button("Guardar Clave Gemini"):
+            gemini_in = st.text_input("Clave de Asistente IA:", value=gemini_act, type="password")
+            if st.button("Guardar Clave"):
                 set_config("gemini_api_key", gemini_in.strip())
-                st.success("Clave de IA guardada.")
+                st.success("Clave guardada exitosamente.")
 
         with st.sidebar.expander("📧 Configurar Notificaciones por Email"):
             with st.form("form_smtp_cfg"):
@@ -1315,7 +1323,7 @@ if u["rol"] == "profesor":
                             st.success(f"{al_row['nombre']} desmatriculado/a.")
                             st.rerun()
 
-        # --- 3. PESTAÑA CALIFICACIONES (CON DETECTOR IA Y REVISIÓN DE ENTREGAS) ---
+        # --- 3. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
             st.markdown("### 📋 **1. Registro Oficial de Períodos e Informes (TEA / TEP / TED)**")
             
@@ -1472,7 +1480,7 @@ if u["rol"] == "profesor":
                     st.caption("El gráfico representa la distribución académica porcentual de los estudiantes con calificaciones asentadas.")
 
             st.divider()
-            st.markdown("### 🔍 **Revisión de Entregas y Auditoría Antifraude con IA**")
+            st.markdown("### 🔍 **Revisión de Entregas y Auditoría Automática**")
             
             entregas_db = pd.read_sql("""
                 SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as examen, a.tipo as tipo_actividad, a.preguntas_json,
@@ -1542,6 +1550,7 @@ if u["rol"] == "profesor":
                         else:
                             st.markdown("#### **Contenido Entregado por el Alumno:**")
                             texto_alumno = ent['respuesta_data'] if ent['respuesta_data'] else ""
+                            
                             if texto_alumno:
                                 st.markdown(f"""
                                 <div class='task-response-box'>
@@ -1550,26 +1559,13 @@ if u["rol"] == "profesor":
                                 </div>
                                 """, unsafe_allow_html=True)
                             else:
-                                st.write("*(Sin texto desarrollado)*")
+                                st.write("*(Sin texto desarrollado escrito en pantalla)*")
 
-                            # BOTÓN DE ANÁLISIS DE IA Y SIMILITUD WEB
-                            if texto_alumno:
-                                if st.button(f"🔍 Analizar con IA (Uso de IA y Similitud Web)", key=f"btn_scan_{ent['entrega_id']}"):
-                                    with st.spinner("Analizando texto con inteligencia artificial..."):
-                                        api_key_gemini = get_config("gemini_api_key", "")
-                                        reporte = analizar_antifraude_ia(texto_alumno, api_key_gemini)
-                                        
-                                        st.markdown(f"""
-                                        <div class='ai-detector-box' style='border-left: 5px solid {reporte['color']};'>
-                                            <h5 style='margin:0 0 6px 0;'>📊 Resultado de Auditoría de IA y Plagio</h5>
-                                            • <b>Probabilidad de Contenido generado por IA:</b> <span style='color:{reporte['color']}; font-weight:bold;'>{reporte['pct_ia']}%</span><br>
-                                            • <b>Índice de Similitud con Fuentes Web:</b> <b>{reporte['pct_web']}%</b><br>
-                                            • <b>Dictamen:</b> {reporte['dictamen']}
-                                        </div>
-                                        """, unsafe_allow_html=True)
-
+                            # Botón de Descarga del Archivo Adjunto
+                            texto_archivo_extraido = ""
                             if ent['archivo_ruta'] and os.path.exists(ent['archivo_ruta']):
                                 nombre_archivo_real = os.path.basename(ent['archivo_ruta'])
+                                texto_archivo_extraido = extraer_texto_archivo_entrega(ent['archivo_ruta'])
                                 with open(ent['archivo_ruta'], "rb") as f_adj:
                                     st.download_button(
                                         label=f"📥 Descargar Archivo Adjunto ({nombre_archivo_real})",
@@ -1578,9 +1574,24 @@ if u["rol"] == "profesor":
                                         key=f"dl_{ent['entrega_id']}"
                                     )
                             elif ent['archivo_ruta']:
-                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}` (no encontrado en almacenamiento temporal).")
-                            else:
-                                st.info("El alumno no adjuntó archivos en esta entrega.")
+                                st.warning(f"Archivo registrado: `{os.path.basename(ent['archivo_ruta'])}`.")
+
+                            # AUDITORÍA AUTOMÁTICA DE USO DE IA Y SIMILITUD WEB
+                            texto_a_auditar = texto_alumno if texto_alumno else texto_archivo_extraido
+                            if not texto_a_auditar and ent['archivo_ruta']:
+                                texto_a_auditar = os.path.basename(ent['archivo_ruta'])
+
+                            api_key_auditoria = get_config("gemini_api_key", "")
+                            reporte = analizar_antifraude_ia(texto_a_auditar, api_key_auditoria)
+
+                            st.markdown(f"""
+                            <div class='ai-detector-box' style='border-left: 5px solid {reporte['color']};'>
+                                <h5 style='margin:0 0 6px 0; color:#1e293b;'>📊 Auditoría Automática de Autenticidad y Similitud</h5>
+                                • <b>Probabilidad de Contenido generado por IA:</b> <span style='color:{reporte['color']}; font-weight:bold; font-size:15px;'>{reporte['pct_ia']}%</span><br>
+                                • <b>Índice de Similitud con Fuentes Web:</b> <b>{reporte['pct_web']}%</b><br>
+                                • <b>Dictamen:</b> {reporte['dictamen']}
+                            </div>
+                            """, unsafe_allow_html=True)
 
                         with st.form(f"form_corr_{ent['entrega_id']}"):
                             n_nueva = st.number_input("Calificación Final", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
