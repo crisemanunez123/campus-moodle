@@ -1027,6 +1027,25 @@ elif u["rol"] == "profesor":
                                         st.download_button(label=f"📥 Descargar Archivo Bibliográfico ({nom_bf})", data=fb_d.read(), file_name=nom_bf, key=f"dl_bib_{a['id']}")
                                 else:
                                     renderizar_recurso_multimedia(a['enlace_archivo'])
+
+                            # VISTA PREVIA DEL CUESTIONARIO PARA EL DOCENTE
+                            if a['tipo'] == "Cuestionario" and a['preguntas_json']:
+                                with st.popover("👀 Vista Previa (Cómo lo ve el alumno)"):
+                                    st.markdown(f"#### ⏱️ Examen: {a['titulo']}")
+                                    st.caption(f"Duración: {a['duracion_minutos']} minutos")
+                                    try:
+                                        pregs_prev = json.loads(a['preguntas_json'])
+                                        for p_idx, p_val in enumerate(pregs_prev):
+                                            st.markdown(f"**Pregunta N° {p_idx+1}:** {p_val.get('enunciado','')}")
+                                            if p_val.get('tipo') in ['multiple_choice', 'verdadero_falso']:
+                                                for elec in p_val.get('opciones_config', []):
+                                                    st.write(f"○ {elec['texto']} (Valor: {elec['calificacion']}%)")
+                                            elif p_val.get('tipo') == 'completar_espacios':
+                                                st.write(f"Espacios a completar: {p_val.get('palabras_correctas')}")
+                                            st.divider()
+                                    except Exception:
+                                        st.warning("No se pudo cargar la vista previa del cuestionario.")
+
                     with col_act_del:
                         if st.button("🗑️ Borrar", key=f"del_act_{a['id']}"):
                             c.execute("DELETE FROM foro_mensajes WHERE actividad_id = ?", (a['id'],))
@@ -1036,7 +1055,7 @@ elif u["rol"] == "profesor":
                             st.success("Eliminado.")
                             st.rerun()
 
-        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS (AUDITORÍA AUTOMÁTICA DE IA Y PLAGIO) ---
+        # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS ---
         with tab_correccion:
             st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
             st.caption("Revisá las entregas de los estudiantes, visualizá los porcentajes automáticos de autoría y volcá las calificaciones a la planilla central.")
@@ -1158,7 +1177,7 @@ elif u["rol"] == "profesor":
                         conn.commit()
                         st.rerun()
 
-        # --- 4. PESTAÑA CALIFICACIONES (PLANILLA CENTRAL CON NOTAS DE TRABAJOS Y PERÍODOS) ---
+        # --- 4. PESTAÑA CALIFICACIONES (PLANILLA CENTRAL CON LISTADO DE ALUMNOS) ---
         with tab_calificaciones:
             st.markdown("### 📋 **Planilla Central de Calificaciones**")
             
@@ -1167,14 +1186,12 @@ elif u["rol"] == "profesor":
             if alumnos_curso.empty:
                 st.info("No hay alumnos matriculados en esta cátedra.")
             else:
-                # Obtener todas las actividades evaluativas de la materia
                 acts_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(cat_id,))
                 
                 tabla_calif_central = []
                 for _, al in alumnos_curso.iterrows():
                     fila = {"Estudiante": al['nombre']}
                     
-                    # Notas de actividades corregidas
                     notas_parciales = []
                     for _, act in acts_eval.iterrows():
                         res_nt = c.execute("SELECT nota FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (act['id'], al['id'])).fetchone()
@@ -1186,7 +1203,6 @@ elif u["rol"] == "profesor":
                     
                     fila["Promedio Trabajos"] = f"{(sum(notas_parciales)/len(notas_parciales)):.2f}" if notas_parciales else "-"
 
-                    # Períodos
                     per = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()
                     fila["1° Inf"] = per[0] if per else "-"
                     fila["1° Cuat"] = f"{per[1]:.2f}" if per and per[1] is not None else "-"
