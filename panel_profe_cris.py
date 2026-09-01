@@ -1707,7 +1707,7 @@ else:
                                         if t_p in ["multiple_choice", "verdadero_falso"]:
                                             st.markdown(f"*{p['enunciado']}*")
                                             opciones_disp = [elec['texto'] for elec in p.get('opciones_config', [])]
-                                        rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
+                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
                                         elif t_p == "completar_espacios":
                                             st.markdown(f"*{p['enunciado']}*")
                                             correctas = p['palabras_correctas']
@@ -1802,7 +1802,7 @@ else:
     with tab_al_chat:
         st.markdown("### ✉️ **Mensajes al Profesor**")
         try:
-            mens_al = pd.read_sql("SELECT mensaje, fecha, emisor_id FROM mensajes_privados WHERE catedra_id = %s AND ((emisor_id = %s AND receptor_id = %s) OR (emisor_id = %s AND receptor_id = %s))", conn, params=(materia_id, int(u["id"]), int(materia_row["profesor_id"]), int(materia_row["profesor_id"]), int(u["id"])))
+            mens_al = pd.read_sql("SELECT mensaje, fecha, emisor_id FROM mensajes_privados WHERE catedra_id = %s AND ((emisor_id = %s AND receptor_id = %s) OR (emisor_id = %s AND receptor_id = %s)) ORDER BY m.id ASC", conn, params=(materia_id, int(u["id"]), int(materia_row["profesor_id"]), int(materia_row["profesor_id"]), int(u["id"])))
         except Exception:
             conn.rollback()
             mens_al = pd.DataFrame()
