@@ -1,6 +1,4 @@
 import streamlit as st
-import sqlite3
-import pandas as pd
 import os
 import json
 import time
@@ -10,9 +8,8 @@ import base64
 import urllib.parse
 import urllib.request
 import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 from datetime import datetime, date
+import psycopg2
 
 st.set_page_config(page_title="Plataforma Educativa", page_icon="🎓", layout="wide")
 
@@ -106,10 +103,22 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 15px;
     }
-    .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
-    .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
-    .task-response-box { background-color: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
-    .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
+    .forum-msg-docente {
+        background-color: #f0f9ff;
+        border-left: 5px solid #0284c7;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+    }
+    .forum-msg-alumno {
+        background-color: #ffffff;
+        border: 1px solid #e2e8f0;
+        border-left: 5px solid #64748b;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
     .ai-detector-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
@@ -142,17 +151,25 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- BASE DE DATOS LOCAL Y AUTO-MIGRACIÓN ---
-conn = sqlite3.connect("campus_moodle.db", check_same_thread=False)
+# --- CONEXIÓN A SUPABASE (POSTGRESQL) ---
+def init_connection():
+    if "postgres" in st.secrets:
+        db_url = st.secrets["postgres"]["url"]
+    else:
+        db_url = "postgresql://postgres:Exitos2016!!@db.hynbnjocmsarlfjesqjy.supabase.co:5432/postgres"
+    return psycopg2.connect(db_url)
+
+conn = init_connection()
 c = conn.cursor()
 
+# --- CREACIÓN DE TABLAS EN POSTGRESQL ---
 c.execute("""
 CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     username TEXT UNIQUE,
     password TEXT,
     nombre TEXT,
-    email TEXT,
+    email TEXT UNIQUE,
     rol TEXT,
     foto_perfil TEXT,
     dni TEXT DEFAULT '',
@@ -162,55 +179,48 @@ CREATE TABLE IF NOT EXISTS usuarios (
 """)
 
 try:
-    cols_usr = [col[1] for col in c.execute("PRAGMA table_info(usuarios)").fetchall()]
-    if "dni" not in cols_usr:
-        c.execute("ALTER TABLE usuarios ADD COLUMN dni TEXT DEFAULT ''")
-    if "domicilio" not in cols_usr:
-        c.execute("ALTER TABLE usuarios ADD COLUMN domicilio TEXT DEFAULT ''")
-    if "telefono" not in cols_usr:
-        c.execute("ALTER TABLE usuarios ADD COLUMN telefono TEXT DEFAULT ''")
+    c.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS dni TEXT DEFAULT ''")
+    c.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS domicilio TEXT DEFAULT ''")
+    c.execute("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS telefono TEXT DEFAULT ''")
     conn.commit()
 except Exception:
-    pass
+    conn.rollback()
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS suscripciones_meses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     profesor_id INTEGER,
     anio INTEGER,
     mes TEXT,
     pagado INTEGER DEFAULT 0,
-    UNIQUE(profesor_id, anio, mes),
-    FOREIGN KEY(profesor_id) REFERENCES usuarios(id)
+    UNIQUE(profesor_id, anio, mes)
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS catedras (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     nombre TEXT,
     codigo TEXT,
     categoria TEXT DEFAULT 'General',
     curso_anio TEXT,
     escuela TEXT,
-    profesor_id INTEGER,
-    FOREIGN KEY(profesor_id) REFERENCES usuarios(id)
+    profesor_id INTEGER
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS secciones (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     catedra_id INTEGER,
     titulo TEXT,
-    orden INTEGER,
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id)
+    orden INTEGER
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS actividades (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     catedra_id INTEGER,
     seccion_id INTEGER,
     titulo TEXT,
@@ -220,26 +230,22 @@ CREATE TABLE IF NOT EXISTS actividades (
     preguntas_json TEXT,
     descripcion TEXT,
     enlace_archivo TEXT,
-    es_obligatorio INTEGER DEFAULT 0,
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
-    FOREIGN KEY(seccion_id) REFERENCES secciones(id)
+    es_obligatorio INTEGER DEFAULT 0
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS matriculas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     catedra_id INTEGER,
     estudiante_id INTEGER,
-    UNIQUE(catedra_id, estudiante_id),
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
-    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+    UNIQUE(catedra_id, estudiante_id)
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS entregas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     actividad_id INTEGER,
     estudiante_id INTEGER,
     fecha_entrega TEXT,
@@ -249,71 +255,46 @@ CREATE TABLE IF NOT EXISTS entregas (
     devolucion TEXT,
     tiempo_empleado_seg INTEGER,
     reescritura_autorizada INTEGER DEFAULT 0,
-    UNIQUE(actividad_id, estudiante_id),
-    FOREIGN KEY(actividad_id) REFERENCES actividades(id),
-    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+    UNIQUE(actividad_id, estudiante_id)
 )
 """)
 
-try:
-    cols_ent = [col[1] for col in c.execute("PRAGMA table_info(entregas)").fetchall()]
-    if "reescritura_autorizada" not in cols_ent:
-        c.execute("ALTER TABLE entregas ADD COLUMN reescritura_autorizada INTEGER DEFAULT 0")
-        conn.commit()
-except Exception:
-    pass
-
 c.execute("""
 CREATE TABLE IF NOT EXISTS asistencias (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     catedra_id INTEGER,
     estudiante_id INTEGER,
     fecha TEXT,
     estado TEXT,
-    UNIQUE(catedra_id, estudiante_id, fecha),
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
-    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+    UNIQUE(catedra_id, estudiante_id, fecha)
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS foro_mensajes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     actividad_id INTEGER,
     usuario_id INTEGER,
     mensaje TEXT,
-    fecha TEXT,
-    FOREIGN KEY(actividad_id) REFERENCES actividades(id),
-    FOREIGN KEY(usuario_id) REFERENCES usuarios(id)
+    fecha TEXT
 )
 """)
 
 c.execute("""
 CREATE TABLE IF NOT EXISTS mensajes_privados (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     emisor_id INTEGER,
     receptor_id INTEGER,
     catedra_id INTEGER,
     mensaje TEXT,
     fecha TEXT,
-    leido INTEGER DEFAULT 0,
-    FOREIGN KEY(emisor_id) REFERENCES usuarios(id),
-    FOREIGN KEY(receptor_id) REFERENCES usuarios(id),
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id)
+    leido INTEGER DEFAULT 0
 )
 """)
 
-try:
-    cols_msg = [col[1] for col in c.execute("PRAGMA table_info(mensajes_privados)").fetchall()]
-    if "leido" not in cols_msg:
-        c.execute("ALTER TABLE mensajes_privados ADD COLUMN leido INTEGER DEFAULT 0")
-        conn.commit()
-except Exception:
-    pass
-
 c.execute("""
 CREATE TABLE IF NOT EXISTS calificaciones_periodos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id SERIAL PRIMARY KEY,
     catedra_id INTEGER,
     estudiante_id INTEGER,
     informe_avance_1 TEXT DEFAULT '-',
@@ -321,9 +302,7 @@ CREATE TABLE IF NOT EXISTS calificaciones_periodos (
     informe_avance_2 TEXT DEFAULT '-',
     cuatrimestre_2 REAL,
     calificacion_final_dic REAL,
-    UNIQUE(catedra_id, estudiante_id),
-    FOREIGN KEY(catedra_id) REFERENCES catedras(id),
-    FOREIGN KEY(estudiante_id) REFERENCES usuarios(id)
+    UNIQUE(catedra_id, estudiante_id)
 )
 """)
 
@@ -335,10 +314,10 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN Y PROFESOR ---
 try:
-    admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
-    if not admin_check:
+    c.execute("SELECT id FROM usuarios WHERE username = 'cristian'")
+    if not c.fetchone():
         c.execute("""
             INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
             VALUES ('cristian', '1234', 'Cristian Nuñez', 'cristian@educacion.edu', 'admin', '34567890', 'Buenos Aires', '5491112345678')
@@ -347,23 +326,36 @@ try:
     else:
         c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
         conn.commit()
+
+    c.execute("SELECT id FROM usuarios WHERE username = 'profesor'")
+    if not c.fetchone():
+        c.execute("""
+            INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
+            VALUES ('profesor', 'Exitos2016!', 'Profesor Titular', 'profesor@educacion.edu', 'profesor', '23456789', 'Buenos Aires', '5491187654321')
+        """)
+        conn.commit()
+    else:
+        c.execute("UPDATE usuarios SET rol = 'profesor', password = 'Exitos2016!' WHERE username = 'profesor'")
+        conn.commit()
 except Exception:
-    pass
+    conn.rollback()
 
 # --- FUNCIONES AUXILIARES Y DE EXPORTACIÓN (WORD Y PDF) ---
 def get_config(clave, default=""):
     try:
-        r = c.execute("SELECT valor FROM configuracion WHERE clave = ?", (clave,)).fetchone()
+        c.execute("SELECT valor FROM configuracion WHERE clave = %s", (clave,))
+        r = c.fetchone()
         return r[0] if r else default
     except Exception:
+        conn.rollback()
         return default
 
 def set_config(clave, valor):
     try:
-        c.execute("INSERT OR REPLACE INTO configuracion (clave, valor) VALUES (?, ?)", (clave, valor))
+        c.execute("INSERT INTO configuracion (clave, valor) VALUES (%s, %s) ON CONFLICT (clave) DO UPDATE SET valor = EXCLUDED.valor", (clave, valor))
         conn.commit()
     except Exception:
-        pass
+        conn.rollback()
 
 def exportar_documento_word(titulo, contenido):
     contenido_html = contenido.replace("\n", "<br>")
@@ -430,38 +422,6 @@ p, li {{ font-size: 14px; text-align: justify; }}
 </html>"""
     return html_pdf.encode('utf-8')
 
-def enviar_correo_smtp(destinatario, asunto, cuerpo):
-    remitente = get_config("smtp_email", "").strip()
-    smtp_pass = get_config("smtp_password", "").strip().replace(" ", "")
-    
-    if not remitente or not smtp_pass:
-        return False, "Faltan configurar el email emisor y la Contraseña de Aplicación."
-
-    msg = MIMEMultipart()
-    msg['From'] = f"Plataforma Educativa <{remitente}>"
-    msg['To'] = destinatario
-    msg['Subject'] = asunto
-    msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
-
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
-        server.ehlo()
-        server.starttls()
-        server.ehlo()
-        server.login(remitente, smtp_pass)
-        server.send_message(msg)
-        server.quit()
-        return True, "Correo enviado exitosamente."
-    except Exception as e1:
-        try:
-            server_ssl = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
-            server_ssl.login(remitente, smtp_pass)
-            server_ssl.send_message(msg)
-            server_ssl.quit()
-            return True, "Correo enviado exitosamente (SSL)."
-        except Exception as e2:
-            return False, f"Error al conectar con Gmail: {str(e1)} | {str(e2)}"
-
 def extraer_texto_archivo_entrega(ruta_archivo):
     if not ruta_archivo or not isinstance(ruta_archivo, str) or not os.path.exists(ruta_archivo):
         return ""
@@ -514,11 +474,9 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
 
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
-# --- ASISTENTE IA AMPLIADO (ESTILO GEMINI PROFUNDO Y ANÁLISIS DE ARCHIVOS) ---
 def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", texto_archivo_adjunto="", api_key=""):
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
-        
         prompt = f"""Eres un pedagogo y profesor universitario experto, especializado en la creación de contenidos curriculares extensos, profundos y de alta calidad académica.
 
 Tipo de recurso a elaborar: '{tipo_recurso}'
@@ -634,10 +592,14 @@ if "tiempo_inicio_examen" not in st.session_state:
     st.session_state.tiempo_inicio_examen = None
 
 def login(usuario, clave):
-    res = c.execute("SELECT id, username, nombre, email, rol, password, foto_perfil FROM usuarios WHERE username = ? AND password = ?", (usuario, clave)).fetchone()
-    if res:
-        st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4], "foto_perfil": res[6]}
-        return True
+    try:
+        c.execute("SELECT id, username, nombre, email, rol, password, foto_perfil FROM usuarios WHERE username = %s AND password = %s", (usuario, clave))
+        res = c.fetchone()
+        if res:
+            st.session_state.user = {"id": res[0], "username": res[1], "nombre": res[2], "email": res[3], "rol": res[4], "foto_perfil": res[6]}
+            return True
+    except Exception:
+        conn.rollback()
     return False
 
 def logout():
@@ -665,10 +627,10 @@ if st.session_state.user is None:
                     st.success("Acceso concedido.")
                     st.rerun()
                 else:
-                    st.error("Credenciales incorrectas (Admin: `cristian`/`1234`)")
+                    st.error("Credenciales incorrectas (Admin: `cristian`/`1234` | Profe: `profesor`/`Exitos2016!`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL CON ASISTENTE IA ESTILO GEMINI (AMPLIADO Y CON SUBIDA DE ARCHIVOS) ---
+# --- ENCABEZADO GLOBAL CON ASISTENTE IA ---
 u = st.session_state.user
 col_h1, col_h2, col_h3 = st.columns([2.5, 4, 5.5])
 with col_h1:
@@ -700,7 +662,6 @@ with col_h3:
                 n_ia = st.text_input("Nivel / Curso destinatario:", placeholder="Ej: 5° Año - Técnico", key="nivel_flotante_ia")
                 e_ia = st.text_area("Enfoque o instrucciones específicas:", placeholder="Ej: Enfatizar en casos prácticos y resolución de problemas...", key="enfoque_flotante_ia")
                 
-                # POSIBILIDAD DE SUBIR ARCHIVO PARA QUE LA IA LO ANALICE
                 arch_asistente = st.file_uploader("📂 Adjuntar archivo de referencia (PDF, Word, TXT):", type=["pdf", "docx", "txt", "xlsx"], key="upl_asistente_ia")
                 texto_archivo_extraido_asistente = ""
                 if arch_asistente is not None:
@@ -795,12 +756,13 @@ if u["rol"] == "admin":
                     try:
                         c.execute("""
                             INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
-                            VALUES (?, ?, ?, ?, 'profesor', ?, ?, ?)
+                            VALUES (%s, %s, %s, %s, 'profesor', %s, %s, %s)
                         """, (usr_cli.strip(), pwd_cli.strip(), nom_cli.strip(), mail_cli.strip(), dni_cli.strip(), dom_cli.strip(), tel_cli.strip()))
                         conn.commit()
                         st.success(f"Cliente {nom_cli} registrado exitosamente.")
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except Exception:
+                        conn.rollback()
                         st.error("El usuario o email ya existe en el sistema.")
                 else:
                     st.error("Por favor complete los campos obligatorios.")
@@ -808,7 +770,12 @@ if u["rol"] == "admin":
         st.divider()
         st.markdown("### 📋 **Listado de Clientes y Control de Pagos Anuales**")
         
-        clientes_db = pd.read_sql("SELECT id, nombre, dni, domicilio, email, telefono FROM usuarios WHERE rol = 'profesor'", conn)
+        try:
+            clientes_db = pd.read_sql("SELECT id, nombre, dni, domicilio, email, telefono FROM usuarios WHERE rol = 'profesor'", conn)
+        except Exception:
+            conn.rollback()
+            clientes_db = pd.DataFrame()
+
         if clientes_db.empty:
             st.info("No hay profesores registrados como clientes.")
         else:
@@ -822,18 +789,26 @@ if u["rol"] == "admin":
                     
                     cols_meses = st.columns(6)
                     for idx, mes in enumerate(meses_anio):
-                        pagado_previo = c.execute("SELECT pagado FROM suscripciones_meses WHERE profesor_id = ? AND anio = ? AND mes = ?", (cli['id'], anio_actual, mes)).fetchone()
-                        val_pagado = bool(pagado_previo[0]) if pagado_previo else False
+                        try:
+                            c.execute("SELECT pagado FROM suscripciones_meses WHERE profesor_id = %s AND anio = %s AND mes = %s", (int(cli['id']), anio_actual, mes))
+                            pagado_previo = c.fetchone()
+                            val_pagado = bool(pagado_previo[0]) if pagado_previo else False
+                        except Exception:
+                            conn.rollback()
+                            val_pagado = False
                         
                         with cols_meses[idx % 6]:
                             nuevo_estado = st.checkbox(mes, value=val_pagado, key=f"pago_{cli['id']}_{mes}_{anio_actual}")
                             if nuevo_estado != val_pagado:
-                                c.execute("""
-                                    INSERT INTO suscripciones_meses (profesor_id, anio, mes, pagado)
-                                    VALUES (?, ?, ?, ?)
-                                    ON CONFLICT(profesor_id, anio, mes) DO UPDATE SET pagado = excluded.pagado
-                                """, (cli['id'], anio_actual, mes, 1 if nuevo_estado else 0))
-                                conn.commit()
+                                try:
+                                    c.execute("""
+                                        INSERT INTO suscripciones_meses (profesor_id, anio, mes, pagado)
+                                        VALUES (%s, %s, %s, %s)
+                                        ON CONFLICT (profesor_id, anio, mes) DO UPDATE SET pagado = EXCLUDED.pagado
+                                    """, (int(cli['id']), anio_actual, mes, 1 if nuevo_estado else 0))
+                                    conn.commit()
+                                except Exception:
+                                    conn.rollback()
 
                     st.divider()
                     tel_limpio = re.sub(r'\D', '', str(cli['telefono']))
@@ -907,17 +882,25 @@ elif u["rol"] == "profesor":
                     if st.form_submit_button("Crear Curso"):
                         if nom_mat.strip():
                             cod_auto = f"C-{int(time.time())}"
-                            c.execute("""
-                                INSERT INTO catedras (nombre, codigo, categoria, curso_anio, escuela, profesor_id)
-                                VALUES (?, ?, 'General', ?, ?, ?)
-                            """, (nom_mat.strip(), cod_auto, curso_anio.strip(), escuela.strip(), u["id"]))
-                            conn.commit()
-                            st.success("Curso creado exitosamente.")
-                            st.rerun()
+                            try:
+                                c.execute("""
+                                    INSERT INTO catedras (nombre, codigo, categoria, curso_anio, escuela, profesor_id)
+                                    VALUES (%s, %s, 'General', %s, %s, %s)
+                                """, (nom_mat.strip(), cod_auto, curso_anio.strip(), escuela.strip(), int(u["id"])))
+                                conn.commit()
+                                st.success("Curso creado exitosamente.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
+                                st.error("Error al crear el curso.")
                         else:
                             st.error("El nombre de la materia es obligatorio.")
 
-        df_materias = pd.read_sql("SELECT id, nombre, curso_anio, escuela FROM catedras WHERE profesor_id = ?", conn, params=(u["id"],))
+        try:
+            df_materias = pd.read_sql("SELECT id, nombre, curso_anio, escuela FROM catedras WHERE profesor_id = %s", conn, params=(int(u["id"]),))
+        except Exception:
+            conn.rollback()
+            df_materias = pd.DataFrame()
 
         if df_materias.empty:
             st.info("Aún no tienes cursos creados. Pulsa '➕ Crear Curso / Materia' para comenzar.")
@@ -943,22 +926,31 @@ elif u["rol"] == "profesor":
                     c_card_btn1, c_card_btn2 = st.columns([2, 1])
                     with c_card_btn1:
                         if st.button(f"Entrar ➜", key=f"entrar_{row['id']}"):
-                            st.session_state.materia_seleccionada_id = row['id']
+                            st.session_state.materia_seleccionada_id = int(row['id'])
                             st.rerun()
                     with c_card_btn2:
                         if st.button(f"🗑️ Borrar", key=f"del_curso_{row['id']}"):
-                            c.execute("DELETE FROM actividades WHERE catedra_id = ?", (row['id'],))
-                            c.execute("DELETE FROM secciones WHERE catedra_id = ?", (row['id'],))
-                            c.execute("DELETE FROM matriculas WHERE catedra_id = ?", (row['id'],))
-                            c.execute("DELETE FROM catedras WHERE id = ?", (row['id'],))
-                            conn.commit()
-                            st.success("Curso eliminado.")
-                            st.rerun()
+                            try:
+                                c.execute("DELETE FROM actividades WHERE catedra_id = %s", (int(row['id']),))
+                                c.execute("DELETE FROM secciones WHERE catedra_id = %s", (int(row['id']),))
+                                c.execute("DELETE FROM matriculas WHERE catedra_id = %s", (int(row['id']),))
+                                c.execute("DELETE FROM catedras WHERE id = %s", (int(row['id']),))
+                                conn.commit()
+                                st.success("Curso eliminado.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
 
     # DENTRO DE UNA MATERIA
     else:
         cat_id = st.session_state.materia_seleccionada_id
-        res_cat = c.execute("SELECT nombre, curso_anio, escuela FROM catedras WHERE id = ?", (cat_id,)).fetchone()
+        try:
+            c.execute("SELECT nombre, curso_anio, escuela FROM catedras WHERE id = %s", (int(cat_id),))
+            res_cat = c.fetchone()
+        except Exception:
+            conn.rollback()
+            res_cat = ("Curso", "", "")
+
         nombre_materia = res_cat[0]
         sub_info = f" — {res_cat[1]} ({res_cat[2]})" if res_cat[1] or res_cat[2] else ""
 
@@ -981,14 +973,23 @@ elif u["rol"] == "profesor":
                     with st.form("form_nueva_secc", clear_on_submit=True):
                         nom_secc = st.text_input("Nombre de la Sección (ej: Unidad 1)")
                         if st.form_submit_button("Crear Sección") and nom_secc:
-                            orden_max = c.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM secciones WHERE catedra_id = ?", (cat_id,)).fetchone()[0]
-                            c.execute("INSERT INTO secciones (catedra_id, titulo, orden) VALUES (?, ?, ?)", (cat_id, nom_secc.strip(), orden_max))
-                            conn.commit()
-                            st.success("Sección creada.")
-                            st.rerun()
+                            try:
+                                c.execute("SELECT COALESCE(MAX(orden), 0) + 1 FROM secciones WHERE catedra_id = %s", (int(cat_id),))
+                                orden_max = c.fetchone()[0]
+                                c.execute("INSERT INTO secciones (catedra_id, titulo, orden) VALUES (%s, %s, %s)", (int(cat_id), nom_secc.strip(), int(orden_max)))
+                                conn.commit()
+                                st.success("Sección creada.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
 
             with st.expander("➕ Añadir una actividad o un recurso"):
-                df_secc = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
+                try:
+                    df_secc = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = %s ORDER BY orden ASC", conn, params=(int(cat_id),))
+                except Exception:
+                    conn.rollback()
+                    df_secc = pd.DataFrame()
+
                 if df_secc.empty:
                     st.warning("Primero creá al menos una sección arriba para añadir actividades.")
                 else:
@@ -999,7 +1000,7 @@ elif u["rol"] == "profesor":
                         "📝 Tarea (Entrega de Archivo/Texto)"
                     ], key=f"tipo_mod_sel_{cat_id}")
                     
-                    sec_map = {r['titulo']: r['id'] for _, r in df_secc.iterrows()}
+                    sec_map = {r['titulo']: int(r['id']) for _, r in df_secc.iterrows()}
                     sec_elegida = st.selectbox("Sección de destino:", list(sec_map.keys()), key=f"sec_elegida_sel_{cat_id}")
 
                     with st.form(f"form_publicar_recurso_{cat_id}", clear_on_submit=True):
@@ -1086,26 +1087,42 @@ elif u["rol"] == "profesor":
                                     with open(ruta_final_biblio, "wb") as fb:
                                         fb.write(archivo_subido_biblio.getbuffer())
 
-                                c.execute("""
-                                    INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo, es_obligatorio)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (cat_id, sec_map[sec_elegida], tit_act.strip(), tipo_db, str(f_lim), dur_min, json_str, desc_act, ruta_final_biblio, es_obligatorio_val))
-                                conn.commit()
-                                st.success("¡Publicado exitosamente!")
-                                st.rerun()
+                                try:
+                                    c.execute("""
+                                        INSERT INTO actividades (catedra_id, seccion_id, titulo, tipo, fecha_limite, duracion_minutos, preguntas_json, descripcion, enlace_archivo, es_obligatorio)
+                                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    """, (int(cat_id), int(sec_map[sec_elegida]), tit_act.strip(), tipo_db, str(f_lim), int(dur_min), json_str, desc_act, ruta_final_biblio, int(es_obligatorio_val)))
+                                    conn.commit()
+                                    st.success("¡Publicado exitosamente!")
+                                    st.rerun()
+                                except Exception:
+                                    conn.rollback()
 
-            df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(cat_id,))
+            try:
+                df_secciones = pd.read_sql("SELECT id, titulo, orden FROM secciones WHERE catedra_id = %s ORDER BY orden ASC", conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                df_secciones = pd.DataFrame()
+
             for _, sec in df_secciones.iterrows():
                 st.divider()
                 col_s_tit, col_s_del_sec = st.columns([5, 1])
                 col_s_tit.markdown(f"### 📂 **{sec['titulo']}**")
                 if col_s_del_sec.button("🗑️ Borrar Unidad", key=f"del_sec_{sec['id']}"):
-                    c.execute("DELETE FROM actividades WHERE seccion_id = ?", (sec['id'],))
-                    c.execute("DELETE FROM secciones WHERE id = ?", (sec['id'],))
-                    conn.commit()
-                    st.rerun()
+                    try:
+                        c.execute("DELETE FROM actividades WHERE seccion_id = %s", (int(sec['id']),))
+                        c.execute("DELETE FROM secciones WHERE id = %s", (int(sec['id']),))
+                        conn.commit()
+                        st.rerun()
+                    except Exception:
+                        conn.rollback()
 
-                acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(sec['id'],))
+                try:
+                    acts = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = %s", conn, params=(int(sec['id']),))
+                except Exception:
+                    conn.rollback()
+                    acts = pd.DataFrame()
+
                 for _, a in acts.iterrows():
                     col_act_view, col_act_mod, col_act_del = st.columns([3, 1, 1])
                     with col_act_view:
@@ -1122,13 +1139,17 @@ elif u["rol"] == "profesor":
                             if a['tipo'] == "Foro":
                                 st.divider()
                                 st.markdown("#### 💬 **Debate del Foro:**")
-                                mensajes_foro = pd.read_sql("""
-                                    SELECT m.id, m.mensaje, m.fecha, u.nombre, u.rol
-                                    FROM foro_mensajes m
-                                    JOIN usuarios u ON m.usuario_id = u.id
-                                    WHERE m.actividad_id = ?
-                                    ORDER BY m.id ASC
-                                """, conn, params=(a['id'],))
+                                try:
+                                    mensajes_foro = pd.read_sql("""
+                                        SELECT m.id, m.mensaje, m.fecha, u.nombre, u.rol
+                                        FROM foro_mensajes m
+                                        JOIN usuarios u ON m.usuario_id = u.id
+                                        WHERE m.actividad_id = %s
+                                        ORDER BY m.id ASC
+                                    """, conn, params=(int(a['id']),))
+                                except Exception:
+                                    conn.rollback()
+                                    mensajes_foro = pd.DataFrame()
 
                                 if mensajes_foro.empty:
                                     st.info("Aún no hay aportes en este foro. ¡Sé el primero en participar!")
@@ -1148,10 +1169,13 @@ elif u["rol"] == "profesor":
                                 with st.form(f"form_foro_profe_{a['id']}", clear_on_submit=True):
                                     txt_foro = st.text_area("Escribir respuesta en el foro:", key=f"txt_foro_p_{a['id']}")
                                     if st.form_submit_button("Publicar respuesta") and txt_foro.strip():
-                                        c.execute("INSERT INTO foro_mensajes (actividad_id, usuario_id, mensaje, fecha) VALUES (?, ?, ?, ?)", (a['id'], u['id'], txt_foro.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-                                        conn.commit()
-                                        st.success("Publicado.")
-                                        st.rerun()
+                                        try:
+                                            c.execute("INSERT INTO foro_mensajes (actividad_id, usuario_id, mensaje, fecha) VALUES (%s, %s, %s, %s)", (int(a['id']), int(u['id']), txt_foro.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                            conn.commit()
+                                            st.success("Publicado.")
+                                            st.rerun()
+                                        except Exception:
+                                            conn.rollback()
 
                             elif a['tipo'] == "Cuestionario" and a['preguntas_json']:
                                 with st.popover("👀 Vista Previa"):
@@ -1178,33 +1202,43 @@ elif u["rol"] == "profesor":
                                     nuevo_json = st.text_area("Editar JSON de preguntas", value=a['preguntas_json'] if a['preguntas_json'] else "[]", height=150)
 
                                 if st.form_submit_button("Guardar Cambios"):
-                                    c.execute("UPDATE actividades SET titulo = ?, descripcion = ?, preguntas_json = ? WHERE id = ?", (nuevo_tit.strip(), nueva_desc, nuevo_json, a['id']))
-                                    conn.commit()
-                                    st.success("Modificado con éxito.")
-                                    st.rerun()
+                                    try:
+                                        c.execute("UPDATE actividades SET titulo = %s, descripcion = %s, preguntas_json = %s WHERE id = %s", (nuevo_tit.strip(), nueva_desc, nuevo_json, int(a['id'])))
+                                        conn.commit()
+                                        st.success("Modificado con éxito.")
+                                        st.rerun()
+                                    except Exception:
+                                        conn.rollback()
 
                     with col_act_del:
                         if st.button("🗑️ Borrar", key=f"del_act_{a['id']}"):
-                            c.execute("DELETE FROM foro_mensajes WHERE actividad_id = ?", (a['id'],))
-                            c.execute("DELETE FROM entregas WHERE actividad_id = ?", (a['id'],))
-                            c.execute("DELETE FROM actividades WHERE id = ?", (a['id'],))
-                            conn.commit()
-                            st.success("Eliminado.")
-                            st.rerun()
+                            try:
+                                c.execute("DELETE FROM foro_mensajes WHERE actividad_id = %s", (int(a['id']),))
+                                c.execute("DELETE FROM entregas WHERE actividad_id = %s", (int(a['id']),))
+                                c.execute("DELETE FROM actividades WHERE id = %s", (int(a['id']),))
+                                conn.commit()
+                                st.success("Eliminado.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
 
         # --- 2. PESTAÑA CORRECCIÓN DE TRABAJOS ---
         with tab_correccion:
             st.markdown("### 📥 **Corrección de Trabajos y Entregas de Alumnos**")
             st.caption("Revisá las entregas de los estudiantes, visualizá el porcentaje de IA utilizado (>50% en rojo, ≤50% en verde) y volcá las calificaciones a la planilla central.")
             
-            entregas_db = pd.read_sql("""
-                SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as actividad_titulo, a.tipo as tipo_actividad, a.preguntas_json,
-                       e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega, e.reescritura_autorizada
-                FROM entregas e
-                JOIN actividades a ON e.actividad_id = a.id
-                JOIN usuarios u ON e.estudiante_id = u.id
-                WHERE a.catedra_id = ?
-            """, conn, params=(cat_id,))
+            try:
+                entregas_db = pd.read_sql("""
+                    SELECT e.id as entrega_id, u.nombre as alumno, u.email, a.titulo as actividad_titulo, a.tipo as tipo_actividad, a.preguntas_json,
+                           e.respuesta_data, e.archivo_ruta, e.nota, e.devolucion, e.tiempo_empleado_seg, e.fecha_entrega, e.reescritura_autorizada
+                    FROM entregas e
+                    JOIN actividades a ON e.actividad_id = a.id
+                    JOIN usuarios u ON e.estudiante_id = u.id
+                    WHERE a.catedra_id = %s
+                """, conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                entregas_db = pd.DataFrame()
 
             if entregas_db.empty:
                 st.info("Aún no hay trabajos ni entregas registradas por los alumnos en este curso.")
@@ -1224,7 +1258,6 @@ elif u["rol"] == "profesor":
                     pct_ia_val = rep_prev['pct_ia']
                     color_ia = rep_prev['color']
                     
-                    # Título limpio del expander sin HTML crudo
                     titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: {pct_ia_val}% | {nota_txt}{t_min}{aut_badge}"
 
                     with st.expander(titulo_expander, expanded=False):
@@ -1270,19 +1303,25 @@ elif u["rol"] == "profesor":
                             estado_aut = ent['reescritura_autorizada'] == 1
                             if st.button("🔓 Autorizar nuevo envío / reescritura" if not estado_aut else "🔒 Revocar autorización", key=f"btn_aut_corr_{ent['entrega_id']}"):
                                 nuevo_estado = 0 if estado_aut else 1
-                                c.execute("UPDATE entregas SET reescritura_autorizada = ? WHERE id = ?", (nuevo_estado, ent['entrega_id']))
-                                conn.commit()
-                                st.success("Estado actualizado.")
-                                st.rerun()
+                                try:
+                                    c.execute("UPDATE entregas SET reescritura_autorizada = %s WHERE id = %s", (int(nuevo_estado), int(ent['entrega_id'])))
+                                    conn.commit()
+                                    st.success("Estado actualizado.")
+                                    st.rerun()
+                                except Exception:
+                                    conn.rollback()
 
                         with st.form(f"form_corr_tab_{ent['entrega_id']}"):
                             n_nueva = st.number_input("Calificación Final (0 a 10)", min_value=0.0, max_value=10.0, value=float(ent['nota']) if ent['nota'] is not None else 7.0)
                             dev_nueva = st.text_area("Devolución Pedagógica para el Alumno", value=ent['devolucion'] if ent['devolucion'] else "")
                             if st.form_submit_button("💾 Guardar y Volcar a Calificaciones"):
-                                c.execute("UPDATE entregas SET nota = ?, devolucion = ? WHERE id = ?", (n_nueva, dev_nueva, ent['entrega_id']))
-                                conn.commit()
-                                st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
-                                st.rerun()
+                                try:
+                                    c.execute("UPDATE entregas SET nota = %s, devolucion = %s WHERE id = %s", (float(n_nueva), dev_nueva, int(ent['entrega_id'])))
+                                    conn.commit()
+                                    st.success("¡Calificación guardada y volcada a la planilla central con éxito!")
+                                    st.rerun()
+                                except Exception:
+                                    conn.rollback()
 
         # --- 3. PESTAÑA PARTICIPANTES ---
         with tab_participantes:
@@ -1302,26 +1341,33 @@ elif u["rol"] == "profesor":
                     if nom_a.strip() and usr_a.strip() and pwd_a.strip():
                         try:
                             mail_gen = f"{usr_a.strip()}_{int(time.time())}@campus.edu"
-                            c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (?, ?, ?, ?, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_gen))
-                            nuevo_u_id = c.lastrowid
-                            c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (?, ?)", (cat_id, nuevo_u_id))
+                            c.execute("INSERT INTO usuarios (username, password, nombre, email, rol) VALUES (%s, %s, %s, %s, 'estudiante')", (usr_a.strip(), pwd_a.strip(), nom_a.strip(), mail_gen))
+                            conn.commit()
+                            c.execute("SELECT id FROM usuarios WHERE username = %s", (usr_a.strip(),))
+                            nuevo_u_id = c.fetchone()[0]
+                            c.execute("INSERT INTO matriculas (catedra_id, estudiante_id) VALUES (%s, %s)", (int(cat_id), int(nuevo_u_id)))
                             conn.commit()
                             st.success(f"¡Alumno {nom_a} matriculado con éxito!")
                             st.rerun()
-                        except sqlite3.IntegrityError:
+                        except Exception:
+                            conn.rollback()
                             st.error("El nombre de usuario ya existe en el sistema.")
                     else:
                         st.error("Por favor complete los campos obligatorios.")
 
             st.divider()
             st.markdown("### 📋 **Listado General de Alumnos Matriculados**")
-            df_matriculados = pd.read_sql("""
-                SELECT u.id as user_id, u.nombre, u.username, u.password
-                FROM matriculas m 
-                JOIN usuarios u ON m.estudiante_id = u.id 
-                WHERE m.catedra_id = ?
-                ORDER BY u.nombre ASC
-            """, conn, params=(cat_id,))
+            try:
+                df_matriculados = pd.read_sql("""
+                    SELECT u.id as user_id, u.nombre, u.username, u.password
+                    FROM matriculas m 
+                    JOIN usuarios u ON m.estudiante_id = u.id 
+                    WHERE m.catedra_id = %s
+                    ORDER BY u.nombre ASC
+                """, conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                df_matriculados = pd.DataFrame()
 
             if df_matriculados.empty:
                 st.info("No hay alumnos matriculados en esta cátedra.")
@@ -1331,21 +1377,32 @@ elif u["rol"] == "profesor":
                     col_p1.markdown(f"👤 **{al_row['nombre']}** &nbsp;|&nbsp; 🔑 Usuario: `{al_row['username']}` &nbsp;|&nbsp; 🔒 Contraseña: `{al_row['password']}`")
                     with col_p2:
                         if st.button("🗑️ Dar de Baja", key=f"del_mat_{al_row['user_id']}_{cat_id}"):
-                            c.execute("DELETE FROM matriculas WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al_row['user_id']))
-                            conn.commit()
-                            st.success("Alumno dado de baja.")
-                            st.rerun()
+                            try:
+                                c.execute("DELETE FROM matriculas WHERE catedra_id = %s AND estudiante_id = %s", (int(cat_id), int(al_row['user_id'])))
+                                conn.commit()
+                                st.success("Alumno dado de baja.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
 
         # --- 4. PESTAÑA CALIFICACIONES ---
         with tab_calificaciones:
             st.markdown("### 📋 **Planilla Central de Calificaciones**")
             
-            alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
+            try:
+                alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = %s", conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                alumnos_curso = pd.DataFrame()
             
             if alumnos_curso.empty:
                 st.info("No hay alumnos matriculados en esta cátedra.")
             else:
-                acts_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = ? AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(cat_id,))
+                try:
+                    acts_eval = pd.read_sql("SELECT id, titulo FROM actividades WHERE catedra_id = %s AND tipo IN ('Tarea', 'Cuestionario')", conn, params=(int(cat_id),))
+                except Exception:
+                    conn.rollback()
+                    acts_eval = pd.DataFrame()
                 
                 tabla_calif_central = []
                 for _, al in alumnos_curso.iterrows():
@@ -1353,16 +1410,27 @@ elif u["rol"] == "profesor":
                     
                     notas_parciales = []
                     for _, act in acts_eval.iterrows():
-                        res_nt = c.execute("SELECT nota FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", (act['id'], al['id'])).fetchone()
-                        if res_nt and res_nt[0] is not None:
-                            fila[act['titulo']] = f"{res_nt[0]:.2f}"
-                            notas_parciales.append(res_nt[0])
-                        else:
+                        try:
+                            c.execute("SELECT nota FROM entregas WHERE actividad_id = %s AND estudiante_id = %s", (int(act['id']), int(al['id'])))
+                            res_nt = c.fetchone()
+                            if res_nt and res_nt[0] is not None:
+                                fila[act['titulo']] = f"{res_nt[0]:.2f}"
+                                notas_parciales.append(res_nt[0])
+                            else:
+                                fila[act['titulo']] = "-"
+                        except Exception:
+                            conn.rollback()
                             fila[act['titulo']] = "-"
                     
                     fila["Promedio Trabajos"] = f"{(sum(notas_parciales)/len(notas_parciales)):.2f}" if notas_parciales else "-"
 
-                    per = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()
+                    try:
+                        c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = %s AND estudiante_id = %s", (int(cat_id), int(al['id'])))
+                        per = c.fetchone()
+                    except Exception:
+                        conn.rollback()
+                        per = None
+
                     fila["1° Inf"] = per[0] if per else "-"
                     fila["1° Cuat"] = f"{per[1]:.2f}" if per and per[1] is not None else "-"
                     fila["2° Inf"] = per[2] if per else "-"
@@ -1374,7 +1442,7 @@ elif u["rol"] == "profesor":
                 st.dataframe(pd.DataFrame(tabla_calif_central), use_container_width=True, hide_index=True)
 
                 with st.expander("📝 Cargar / Modificar Informes Oficiales (TEA, TEP, TED)"):
-                    map_al_cal = {r['nombre']: r['id'] for _, r in alumnos_curso.iterrows()}
+                    map_al_cal = {r['nombre']: int(r['id']) for _, r in alumnos_curso.iterrows()}
                     sel_al_cal = st.selectbox("Alumno:", list(map_al_cal.keys()), key=f"sel_al_cal_{cat_id}")
                     al_cal_id = map_al_cal[sel_al_cal]
                     with st.form(f"form_per_{al_cal_id}_{cat_id}"):
@@ -1384,37 +1452,59 @@ elif u["rol"] == "profesor":
                         n_c2 = st.number_input("Nota 2° Cuatrimestre:", 0.0, 10.0, 7.0, key=f"c2_{cat_id}")
                         n_fin = st.number_input("Nota Final Diciembre:", 0.0, 10.0, 7.0, key=f"fin_{cat_id}")
                         if st.form_submit_button("Guardar"):
-                            c.execute("""
-                                INSERT INTO calificaciones_periodos (catedra_id, estudiante_id, informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic)
-                                VALUES (?, ?, ?, ?, ?, ?, ?)
-                                ON CONFLICT(catedra_id, estudiante_id) DO UPDATE SET informe_avance_1=excluded.informe_avance_1, cuatrimestre_1=excluded.cuatrimestre_1, informe_avance_2=excluded.informe_avance_2, cuatrimestre_2=excluded.cuatrimestre_2, calificacion_final_dic=excluded.calificacion_final_dic
-                            """, (cat_id, al_cal_id, n_inf1, n_c1, n_inf2, n_c2, n_fin))
-                            conn.commit()
-                            st.success("Guardado.")
-                            st.rerun()
+                            try:
+                                c.execute("""
+                                    INSERT INTO calificaciones_periodos (catedra_id, estudiante_id, informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic)
+                                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT (catedra_id, estudiante_id) DO UPDATE SET informe_avance_1=EXCLUDED.informe_avance_1, cuatrimestre_1=EXCLUDED.cuatrimestre_1, informe_avance_2=EXCLUDED.informe_avance_2, cuatrimestre_2=EXCLUDED.cuatrimestre_2, calificacion_final_dic=EXCLUDED.calificacion_final_dic
+                                """, (int(cat_id), int(al_cal_id), n_inf1, float(n_c1), n_inf2, float(n_c2), float(n_fin)))
+                                conn.commit()
+                                st.success("Guardado.")
+                                st.rerun()
+                            except Exception:
+                                conn.rollback()
 
         # --- 5. PESTAÑA ASISTENCIA ---
         with tab_asistencia:
             st.markdown("### **Asistencia**")
-            alumnos_asist = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
+            try:
+                alumnos_asist = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = %s", conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                alumnos_asist = pd.DataFrame()
+
             if not alumnos_asist.empty:
                 fecha_sel = st.date_input("Fecha:", value=date.today(), key=f"date_asist_{cat_id}")
                 with st.form(f"form_asist_{cat_id}"):
                     est_dict = {}
                     for _, al in alumnos_asist.iterrows():
-                        est_dict[al['id']] = st.radio(al['nombre'], ["Presente", "Ausente"], horizontal=True, key=f"as_{al['id']}_{cat_id}")
+                        est_dict[int(al['id'])] = st.radio(al['nombre'], ["Presente", "Ausente"], horizontal=True, key=f"as_{al['id']}_{cat_id}")
                     if st.form_submit_button("Guardar Asistencia"):
-                        for aid, estado in est_dict.items():
-                            c.execute("INSERT INTO asistencias (catedra_id, estudiante_id, fecha, estado) VALUES (?, ?, ?, ?) ON CONFLICT(catedra_id, estudiante_id, fecha) DO UPDATE SET estado = excluded.estado", (cat_id, aid, str(fecha_sel), estado))
-                        conn.commit()
-                        st.success("Asistencia guardada.")
+                        try:
+                            for aid, estado in est_dict.items():
+                                c.execute("""
+                                    INSERT INTO asistencias (catedra_id, estudiante_id, fecha, estado) 
+                                    VALUES (%s, %s, %s, %s) 
+                                    ON CONFLICT (catedra_id, estudiante_id, fecha) DO UPDATE SET estado = EXCLUDED.estado
+                                """, (int(cat_id), int(aid), str(fecha_sel), estado))
+                            conn.commit()
+                            st.success("Asistencia guardada.")
+                        except Exception:
+                            conn.rollback()
 
                 st.divider()
                 st.markdown("### 📊 **Resumen de Asistencia General**")
                 resumen_asist = []
                 for _, al in alumnos_asist.iterrows():
-                    total_clases = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ?", (cat_id, al['id'])).fetchone()[0]
-                    total_presentes = c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = ? AND estudiante_id = ? AND estado = 'Presente'", (cat_id, al['id'])).fetchone()[0]
+                    try:
+                        c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = %s AND estudiante_id = %s", (int(cat_id), int(al['id'])))
+                        total_clases = c.fetchone()[0]
+                        c.execute("SELECT COUNT(*) FROM asistencias WHERE catedra_id = %s AND estudiante_id = %s AND estado = 'Presente'", (int(cat_id), int(al['id'])))
+                        total_presentes = c.fetchone()[0]
+                    except Exception:
+                        conn.rollback()
+                        total_clases, total_presentes = 0, 0
+
                     total_ausentes = total_clases - total_presentes
                     pct = round((total_presentes / total_clases) * 100, 1) if total_clases > 0 else 0.0
                     resumen_asist.append({"Estudiante": al['nombre'], "Clases": total_clases, "Presentes": total_presentes, "Ausentes": total_ausentes, "% Asistencia": f"{pct}%"})
@@ -1423,29 +1513,47 @@ elif u["rol"] == "profesor":
         # --- 6. PESTAÑA MENSAJES ---
         with tab_mensajes:
             st.markdown("### ✉️ **Buzón de Mensajes Privados**")
-            alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = ?", conn, params=(cat_id,))
+            try:
+                alumnos_curso = pd.read_sql("SELECT u.id, u.nombre FROM matriculas m JOIN usuarios u ON m.estudiante_id = u.id WHERE m.catedra_id = %s", conn, params=(int(cat_id),))
+            except Exception:
+                conn.rollback()
+                alumnos_curso = pd.DataFrame()
+
             if not alumnos_curso.empty:
-                map_al_msg = {r['nombre']: r['id'] for _, r in alumnos_curso.iterrows()}
+                map_al_msg = {r['nombre']: int(r['id']) for _, r in alumnos_curso.iterrows()}
                 sel_al_chat = st.selectbox("Alumno:", list(map_al_msg.keys()), key=f"sel_chat_al_{cat_id}")
                 al_chat_id = map_al_msg[sel_al_chat]
 
-                mensajes_priv = pd.read_sql("SELECT m.mensaje, m.fecha, m.emisor_id FROM mensajes_privados m WHERE m.catedra_id = ? AND ((m.emisor_id = ? AND m.receptor_id = ?) OR (m.emisor_id = ? AND m.receptor_id = ?)) ORDER BY m.id ASC", conn, params=(cat_id, u["id"], al_chat_id, al_chat_id, u["id"]))
+                try:
+                    mensajes_priv = pd.read_sql("SELECT m.mensaje, m.fecha, m.emisor_id FROM mensajes_privados m WHERE m.catedra_id = %s AND ((m.emisor_id = %s AND m.receptor_id = %s) OR (m.emisor_id = %s AND m.receptor_id = %s)) ORDER BY m.id ASC", conn, params=(int(cat_id), int(u["id"]), int(al_chat_id), int(al_chat_id), int(u["id"])))
+                except Exception:
+                    conn.rollback()
+                    mensajes_priv = pd.DataFrame()
+
                 for _, msg_p in mensajes_priv.iterrows():
                     st.write(f"{'Yo' if msg_p['emisor_id'] == u['id'] else 'Alumno'}: {msg_p['mensaje']}")
 
                 with st.form(f"form_chat_profe_{cat_id}", clear_on_submit=True):
                     txt_m = st.text_area("Mensaje:", key=f"txt_msg_profe_{cat_id}")
                     if st.form_submit_button("Enviar") and txt_m.strip():
-                        c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (?, ?, ?, ?, ?, 0)", (u["id"], al_chat_id, cat_id, txt_m.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-                        conn.commit()
-                        st.rerun()
+                        try:
+                            c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (%s, %s, %s, %s, %s, 0)", (int(u["id"]), int(al_chat_id), int(cat_id), txt_m.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                            conn.commit()
+                            st.rerun()
+                        except Exception:
+                            conn.rollback()
 
 # ==============================================================================
 # 🎓 VISTA ESTUDIANTE
 # ==============================================================================
 else:
     st.markdown("## **Mis Cursos**")
-    df_mis_cursos = pd.read_sql("SELECT c.id, c.nombre, c.curso_anio, c.escuela, c.profesor_id, u.nombre as profesor_nombre FROM catedras c JOIN matriculas m ON c.id = m.catedra_id JOIN usuarios u ON c.profesor_id = u.id WHERE m.estudiante_id = ?", conn, params=(u["id"],))
+    try:
+        df_mis_cursos = pd.read_sql("SELECT c.id, c.nombre, c.curso_anio, c.escuela, c.profesor_id, u.nombre as profesor_nombre FROM catedras c JOIN matriculas m ON c.id = m.catedra_id JOIN usuarios u ON c.profesor_id = u.id WHERE m.estudiante_id = %s", conn, params=(int(u["id"]),))
+    except Exception:
+        conn.rollback()
+        df_mis_cursos = pd.DataFrame()
+
     if df_mis_cursos.empty:
         st.warning("No estás matriculado en ninguna materia.")
         st.stop()
@@ -1453,15 +1561,25 @@ else:
     mat_map = {f"{r['nombre']} ({r['curso_anio']})": r for _, r in df_mis_cursos.iterrows()}
     sel_mat_al = st.selectbox("Curso:", list(mat_map.keys()))
     materia_row = mat_map[sel_mat_al]
-    materia_id = materia_row["id"]
+    materia_id = int(materia_row["id"])
 
     tab_al_curso, tab_al_notas, tab_al_asist, tab_al_chat = st.tabs(["📘 Curso", "📊 Calificaciones", "📋 Asistencia", "✉️ Mensajes"])
 
     with tab_al_curso:
-        df_sec_al = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = ? ORDER BY orden ASC", conn, params=(materia_id,))
+        try:
+            df_sec_al = pd.read_sql("SELECT id, titulo FROM secciones WHERE catedra_id = %s ORDER BY orden ASC", conn, params=(materia_id,))
+        except Exception:
+            conn.rollback()
+            df_sec_al = pd.DataFrame()
+
         for _, s in df_sec_al.iterrows():
             st.markdown(f"#### 📂 {s['titulo']}")
-            acts_al = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = ?", conn, params=(s['id'],))
+            try:
+                acts_al = pd.read_sql("SELECT * FROM actividades WHERE seccion_id = %s", conn, params=(int(s['id']),))
+            except Exception:
+                conn.rollback()
+                acts_al = pd.DataFrame()
+
             for _, act in acts_al.iterrows():
                 with st.expander(f"{act['tipo']}: {act['titulo']}"):
                     st.write(act['descripcion'])
@@ -1473,13 +1591,17 @@ else:
                         else:
                             renderizar_recurso_multimedia(act['enlace_archivo'])
 
-                    # SI ES TAREA: PERMITE SUBIR PDF O CONTESTAR EN CAMPO DE ESCRITURA
                     if act['tipo'] == "Tarea":
-                        ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
+                        try:
+                            ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = %s AND estudiante_id = %s", conn, params=(int(act['id']), int(u['id'])))
+                        except Exception:
+                            conn.rollback()
+                            ent_al = pd.DataFrame()
+
                         ya_rendido = not ent_al.empty
                         reescritura_permitida = False
                         if ya_rendido:
-                            reescritura_permitida = ent_al.iloc[0]['reescritura_autorizada'] == 1
+                            reescritura_permitida = int(ent_al.iloc[0]['reescritura_autorizada']) == 1
 
                         if ya_rendido and not reescritura_permitida:
                             data_e = ent_al.iloc[0]
@@ -1497,10 +1619,13 @@ else:
                             
                             st.divider()
                             if st.button("🔄 Solicitar Autorización de Reenvío", key=f"req_reenv_tarea_{act['id']}"):
-                                msg_auto = f"Hola profesor, solicito autorización para volver a enviar mi tarea en la actividad: '{act['titulo']}'."
-                                c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (?, ?, ?, ?, ?, 0)", (u["id"], materia_row["profesor_id"], materia_id, msg_auto, datetime.now().strftime("%Y-%m-%d %H:%M")))
-                                conn.commit()
-                                st.success("¡Solicitud enviada al profesor!")
+                                try:
+                                    msg_auto = f"Hola profesor, solicito autorización para volver a enviar mi tarea en la actividad: '{act['titulo']}'."
+                                    c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (%s, %s, %s, %s, %s, 0)", (int(u["id"]), int(materia_row["profesor_id"]), materia_id, msg_auto, datetime.now().strftime("%Y-%m-%d %H:%M")))
+                                    conn.commit()
+                                    st.success("¡Solicitud enviada al profesor!")
+                                except Exception:
+                                    conn.rollback()
                         else:
                             if reescritura_permitida:
                                 st.warning("🔓 El profesor te autorizó a realizar una nueva entrega.")
@@ -1522,18 +1647,25 @@ else:
                                             with open(r_path, "wb") as f_up:
                                                 f_up.write(arch_pdf.getbuffer())
 
-                                        c.execute("""
-                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta, reescritura_autorizada)
-                                            VALUES (?, ?, ?, ?, ?, 0)
-                                            ON CONFLICT(actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data, archivo_ruta=excluded.archivo_ruta, reescritura_autorizada=0
-                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), rta_texto.strip(), r_path))
-                                        conn.commit()
-                                        st.success("¡Tarea enviada correctamente!")
-                                        st.rerun()
+                                        try:
+                                            c.execute("""
+                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, archivo_ruta, reescritura_autorizada)
+                                                VALUES (%s, %s, %s, %s, %s, 0)
+                                                ON CONFLICT (actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=EXCLUDED.fecha_entrega, respuesta_data=EXCLUDED.respuesta_data, archivo_ruta=EXCLUDED.archivo_ruta, reescritura_autorizada=0
+                                            """, (int(act['id']), int(u['id']), datetime.now().strftime("%Y-%m-%d %H:%M"), rta_texto.strip(), r_path))
+                                            conn.commit()
+                                            st.success("¡Tarea enviada correctamente!")
+                                            st.rerun()
+                                        except Exception:
+                                            conn.rollback()
 
-                    # SI ES EXAMEN / CUESTIONARIO CON CALIFICACIÓN ESTILO MOODLE
                     elif act['tipo'] == "Cuestionario":
-                        ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = ? AND estudiante_id = ?", conn, params=(act['id'], u['id']))
+                        try:
+                            ent_al = pd.read_sql("SELECT * FROM entregas WHERE actividad_id = %s AND estudiante_id = %s", conn, params=(int(act['id']), int(u['id'])))
+                        except Exception:
+                            conn.rollback()
+                            ent_al = pd.DataFrame()
+
                         ya_rendido = not ent_al.empty
 
                         if ya_rendido:
@@ -1542,7 +1674,7 @@ else:
                         else:
                             if st.session_state.examen_en_curso != act['id']:
                                 if st.button(f"🚀 Comenzar Examen (Tenés {act['duracion_minutos']} minutos)", key=f"start_ex_{act['id']}"):
-                                    st.session_state.examen_en_curso = act['id']
+                                    st.session_state.examen_en_curso = int(act['id'])
                                     st.session_state.tiempo_inicio_examen = time.time()
                                     st.rerun()
 
@@ -1550,7 +1682,7 @@ else:
                                 st.markdown("<div class='antifraude-warn'>⚠️ ATENCIÓN: Si salís de la página o cambiás de pestaña durante el examen, el intento será finalizado y revisado por el docente.</div>", unsafe_allow_html=True)
 
                                 t_pasado = int(time.time() - st.session_state.tiempo_inicio_examen)
-                                t_total = act['duracion_minutos'] * 60
+                                t_total = int(act['duracion_minutos']) * 60
                                 t_restante = max(0, t_total - t_pasado)
                                 
                                 mins, segs = divmod(t_restante, 60)
@@ -1575,7 +1707,7 @@ else:
                                         if t_p in ["multiple_choice", "verdadero_falso"]:
                                             st.markdown(f"*{p['enunciado']}*")
                                             opciones_disp = [elec['texto'] for elec in p.get('opciones_config', [])]
-                                            rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
+                                        rtas_seleccionadas[idx] = st.radio("Seleccioná la respuesta:", opciones_disp, key=f"ans_{act['id']}_{idx}")
                                         elif t_p == "completar_espacios":
                                             st.markdown(f"*{p['enunciado']}*")
                                             correctas = p['palabras_correctas']
@@ -1609,21 +1741,30 @@ else:
                                         nota_calc = min(10.0, max(0.0, nota_calc))
                                         dev_auto = f"Examen finalizado. Calificación obtenida: {nota_calc}/10."
 
-                                        c.execute("""
-                                            INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg, reescritura_autorizada)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-                                            ON CONFLICT(actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=excluded.fecha_entrega, respuesta_data=excluded.respuesta_data, nota=excluded.nota, devolucion=excluded.devolucion, tiempo_empleado_seg=excluded.tiempo_empleado_seg, reescritura_autorizada=0
-                                        """, (act['id'], u['id'], datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), nota_calc, dev_auto, t_pasado))
-                                        conn.commit()
-                                        st.session_state.examen_en_curso = None
-                                        st.session_state.tiempo_inicio_examen = None
-                                        st.success(f"Examen enviado correctamente. Nota: {nota_calc}/10")
-                                        st.rerun()
+                                        try:
+                                            c.execute("""
+                                                INSERT INTO entregas (actividad_id, estudiante_id, fecha_entrega, respuesta_data, nota, devolucion, tiempo_empleado_seg, reescritura_autorizada)
+                                                VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
+                                                ON CONFLICT (actividad_id, estudiante_id) DO UPDATE SET fecha_entrega=EXCLUDED.fecha_entrega, respuesta_data=EXCLUDED.respuesta_data, nota=EXCLUDED.nota, devolucion=EXCLUDED.devolucion, tiempo_empleado_seg=EXCLUDED.tiempo_empleado_seg, reescritura_autorizada=0
+                                            """, (int(act['id']), int(u['id']), datetime.now().strftime("%Y-%m-%d %H:%M"), json.dumps(rtas_seleccionadas, ensure_ascii=False), float(nota_calc), dev_auto, int(t_pasado)))
+                                            conn.commit()
+                                            st.session_state.examen_en_curso = None
+                                            st.session_state.tiempo_inicio_examen = None
+                                            st.success(f"Examen enviado correctamente. Nota: {nota_calc}/10")
+                                            st.rerun()
+                                        except Exception:
+                                            conn.rollback()
 
     with tab_al_notas:
         st.markdown("### 📊 **Mis Calificaciones y Devoluciones**")
         
-        per_al = c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = ? AND estudiante_id = ?", (materia_id, u['id'])).fetchone()
+        try:
+            c.execute("SELECT informe_avance_1, cuatrimestre_1, informe_avance_2, cuatrimestre_2, calificacion_final_dic FROM calificaciones_periodos WHERE catedra_id = %s AND estudiante_id = %s", (materia_id, int(u['id'])))
+            per_al = c.fetchone()
+        except Exception:
+            conn.rollback()
+            per_al = None
+
         if per_al:
             c1, c2, c3 = st.columns(3)
             c1.metric("1° Cuatrimestre", f"{per_al[1]:.2f}" if per_al[1] is not None else "-")
@@ -1633,12 +1774,16 @@ else:
         st.divider()
         st.markdown("#### 📝 **Desglose de Trabajos y Exámenes Corregidos:**")
         
-        df_notas_estudiante = pd.read_sql("""
-            SELECT a.titulo as Actividad, a.tipo as Tipo, e.nota as Calificación, e.devolucion as Devolución, e.fecha_entrega as 'Fecha de Entrega'
-            FROM actividades a
-            JOIN entregas e ON a.id = e.actividad_id
-            WHERE a.catedra_id = ? AND e.estudiante_id = ?
-        """, conn, params=(materia_id, u['id']))
+        try:
+            df_notas_estudiante = pd.read_sql("""
+                SELECT a.titulo as Actividad, a.tipo as Tipo, e.nota as Calificación, e.devolucion as Devolución, e.fecha_entrega as 'Fecha de Entrega'
+                FROM actividades a
+                JOIN entregas e ON a.id = e.actividad_id
+                WHERE a.catedra_id = %s AND e.estudiante_id = %s
+            """, conn, params=(materia_id, int(u['id'])))
+        except Exception:
+            conn.rollback()
+            df_notas_estudiante = pd.DataFrame()
 
         if df_notas_estudiante.empty:
             st.info("Aún no tenés calificaciones publicadas en este curso.")
@@ -1647,17 +1792,29 @@ else:
 
     with tab_al_asist:
         st.markdown("### **Asistencia**")
-        df_a = pd.read_sql("SELECT fecha, estado FROM asistencias WHERE catedra_id = ? AND estudiante_id = ?", conn, params=(materia_id, u['id']))
+        try:
+            df_a = pd.read_sql("SELECT fecha, estado FROM asistencias WHERE catedra_id = %s AND estudiante_id = %s", conn, params=(materia_id, int(u['id'])))
+        except Exception:
+            conn.rollback()
+            df_a = pd.DataFrame()
         st.dataframe(df_a, use_container_width=True)
 
     with tab_al_chat:
         st.markdown("### ✉️ **Mensajes al Profesor**")
-        mens_al = pd.read_sql("SELECT mensaje, fecha, emisor_id FROM mensajes_privados WHERE catedra_id = ? AND ((emisor_id = ? AND receptor_id = ?) OR (emisor_id = ? AND receptor_id = ?))", conn, params=(materia_id, u["id"], materia_row["profesor_id"], materia_row["profesor_id"], u["id"]))
+        try:
+            mens_al = pd.read_sql("SELECT mensaje, fecha, emisor_id FROM mensajes_privados WHERE catedra_id = %s AND ((emisor_id = %s AND receptor_id = %s) OR (emisor_id = %s AND receptor_id = %s))", conn, params=(materia_id, int(u["id"]), int(materia_row["profesor_id"]), int(materia_row["profesor_id"]), int(u["id"])))
+        except Exception:
+            conn.rollback()
+            mens_al = pd.DataFrame()
+
         for _, m in mens_al.iterrows():
             st.write(f"{'Yo' if m['emisor_id'] == u['id'] else 'Profesor'}: {m['mensaje']}")
         with st.form("form_msg_est", clear_on_submit=True):
             txt_est = st.text_area("Mensaje:")
             if st.form_submit_button("Enviar") and txt_est.strip():
-                c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (?, ?, ?, ?, ?, 0)", (u["id"], materia_row["profesor_id"], materia_id, txt_est.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
-                conn.commit()
-                st.rerun()
+                try:
+                    c.execute("INSERT INTO mensajes_privados (emisor_id, receptor_id, catedra_id, mensaje, fecha, leido) VALUES (%s, %s, %s, %s, %s, 0)", (int(u["id"]), int(materia_row["profesor_id"]), materia_id, txt_est.strip(), datetime.now().strftime("%Y-%m-%d %H:%M")))
+                    conn.commit()
+                    st.rerun()
+                except Exception:
+                    conn.rollback()
