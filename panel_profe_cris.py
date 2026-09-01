@@ -106,22 +106,10 @@ st.markdown("""
         font-weight: 600;
         margin-bottom: 15px;
     }
-    .forum-msg-docente {
-        background-color: #f0f9ff;
-        border-left: 5px solid #0284c7;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-    }
-    .forum-msg-alumno {
-        background-color: #ffffff;
-        border: 1px solid #e2e8f0;
-        border-left: 5px solid #64748b;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    }
+    .q-correct { background-color: #dcfce7; border-left: 5px solid #16a34a; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #14532d !important; }
+    .q-wrong { background-color: #fee2e2; border-left: 5px solid #ef4444; padding: 12px; margin-bottom: 10px; border-radius: 6px; color: #7f1d1d !important; }
+    .task-response-box { background-color: #f8fafc; border-left: 5px solid #2563eb; padding: 14px; border-radius: 6px; margin-bottom: 12px; }
+    .drag-word-box { background: #e0f2fe; border: 1px solid #0284c7; padding: 4px 10px; border-radius: 4px; font-weight: bold; color: #0369a1; display: inline-block; margin: 2px; }
     .ai-detector-box {
         background: #f8fafc;
         border: 1px solid #cbd5e1;
@@ -164,7 +152,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     username TEXT UNIQUE,
     password TEXT,
     nombre TEXT,
-    email TEXT UNIQUE,
+    email TEXT,
     rol TEXT,
     foto_perfil TEXT,
     dni TEXT DEFAULT '',
@@ -347,7 +335,7 @@ CREATE TABLE IF NOT EXISTS configuracion (
 """)
 conn.commit()
 
-# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN Y PROFESOR ('profesor' / 'Exitos2016!') ---
+# --- VERIFICACIÓN Y CREACIÓN AUTOMÁTICA DEL ADMIN GENERAL ---
 try:
     admin_check = c.execute("SELECT id FROM usuarios WHERE username = 'cristian'").fetchone()
     if not admin_check:
@@ -358,17 +346,6 @@ try:
         conn.commit()
     else:
         c.execute("UPDATE usuarios SET rol = 'admin', password = '1234' WHERE username = 'cristian'")
-        conn.commit()
-
-    profe_check = c.execute("SELECT id FROM usuarios WHERE username = 'profesor'").fetchone()
-    if not profe_check:
-        c.execute("""
-            INSERT INTO usuarios (username, password, nombre, email, rol, dni, domicilio, telefono)
-            VALUES ('profesor', 'Exitos2016!', 'Profesor Titular', 'profesor@educacion.edu', 'profesor', '23456789', 'Buenos Aires', '5491187654321')
-        """)
-        conn.commit()
-    else:
-        c.execute("UPDATE usuarios SET rol = 'profesor', password = 'Exitos2016!' WHERE username = 'profesor'")
         conn.commit()
 except Exception:
     pass
@@ -453,6 +430,38 @@ p, li {{ font-size: 14px; text-align: justify; }}
 </html>"""
     return html_pdf.encode('utf-8')
 
+def enviar_correo_smtp(destinatario, asunto, cuerpo):
+    remitente = get_config("smtp_email", "").strip()
+    smtp_pass = get_config("smtp_password", "").strip().replace(" ", "")
+    
+    if not remitente or not smtp_pass:
+        return False, "Faltan configurar el email emisor y la Contraseña de Aplicación."
+
+    msg = MIMEMultipart()
+    msg['From'] = f"Plataforma Educativa <{remitente}>"
+    msg['To'] = destinatario
+    msg['Subject'] = asunto
+    msg.attach(MIMEText(cuerpo, 'plain', 'utf-8'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587, timeout=10)
+        server.ehlo()
+        server.starttls()
+        server.ehlo()
+        server.login(remitente, smtp_pass)
+        server.send_message(msg)
+        server.quit()
+        return True, "Correo enviado exitosamente."
+    except Exception as e1:
+        try:
+            server_ssl = smtplib.SMTP_SSL('smtp.gmail.com', 465, timeout=10)
+            server_ssl.login(remitente, smtp_pass)
+            server_ssl.send_message(msg)
+            server_ssl.quit()
+            return True, "Correo enviado exitosamente (SSL)."
+        except Exception as e2:
+            return False, f"Error al conectar con Gmail: {str(e1)} | {str(e2)}"
+
 def extraer_texto_archivo_entrega(ruta_archivo):
     if not ruta_archivo or not isinstance(ruta_archivo, str) or not os.path.exists(ruta_archivo):
         return ""
@@ -505,9 +514,11 @@ Devuelve ÚNICAMENTE un objeto JSON con este formato exacto:
 
     return {"pct_ia": pct_ia, "pct_web": pct_web, "dictamen": dictamen, "color": color}
 
+# --- ASISTENTE IA AMPLIADO (ESTILO GEMINI PROFUNDO Y ANÁLISIS DE ARCHIVOS) ---
 def generar_recurso_pedagogico_ia(tipo_recurso, tema, nivel, detalle_adicional="", texto_archivo_adjunto="", api_key=""):
     if api_key:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={api_key.strip()}"
+        
         prompt = f"""Eres un pedagogo y profesor universitario experto, especializado en la creación de contenidos curriculares extensos, profundos y de alta calidad académica.
 
 Tipo de recurso a elaborar: '{tipo_recurso}'
@@ -657,7 +668,7 @@ if st.session_state.user is None:
                     st.error("Credenciales incorrectas (Admin: `cristian`/`1234`)")
     st.stop()
 
-# --- ENCABEZADO GLOBAL CON ASISTENTE IA ESTILO GEMINI ---
+# --- ENCABEZADO GLOBAL CON ASISTENTE IA ESTILO GEMINI (AMPLIADO Y CON SUBIDA DE ARCHIVOS) ---
 u = st.session_state.user
 col_h1, col_h2, col_h3 = st.columns([2.5, 4, 5.5])
 with col_h1:
@@ -689,6 +700,7 @@ with col_h3:
                 n_ia = st.text_input("Nivel / Curso destinatario:", placeholder="Ej: 5° Año - Técnico", key="nivel_flotante_ia")
                 e_ia = st.text_area("Enfoque o instrucciones específicas:", placeholder="Ej: Enfatizar en casos prácticos y resolución de problemas...", key="enfoque_flotante_ia")
                 
+                # POSIBILIDAD DE SUBIR ARCHIVO PARA QUE LA IA LO ANALICE
                 arch_asistente = st.file_uploader("📂 Adjuntar archivo de referencia (PDF, Word, TXT):", type=["pdf", "docx", "txt", "xlsx"], key="upl_asistente_ia")
                 texto_archivo_extraido_asistente = ""
                 if arch_asistente is not None:
@@ -1212,6 +1224,7 @@ elif u["rol"] == "profesor":
                     pct_ia_val = rep_prev['pct_ia']
                     color_ia = rep_prev['color']
                     
+                    # Título limpio del expander sin HTML crudo
                     titulo_expander = f"📌 {ent['alumno']} — Actividad: {ent['actividad_titulo']} ({ent['tipo_actividad']}) | 🤖 IA: {pct_ia_val}% | {nota_txt}{t_min}{aut_badge}"
 
                     with st.expander(titulo_expander, expanded=False):
